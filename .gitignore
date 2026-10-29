@@ -1,0 +1,9 @@
+.build/
+build/
+*.app
+.swiftpm/
+.env*
+*.pem
+*.p12
+*.key
+*.mobileprovision

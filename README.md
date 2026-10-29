@@ -65,3 +65,7 @@ defaults write com.bigmac.app typesafeSSMName <parameter>
 - APFS clones can make duplicate savings look bigger than they are.
 
 Screenshots are rendered from made-up data (`swift run BigMac --snapshot <dir> demo`).
+
+## License
+
+[MIT](LICENSE)

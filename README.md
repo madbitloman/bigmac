@@ -28,8 +28,8 @@ A small, native Mac cleaner with a network monitor and a security audit. It runs
 
 ## Install
 
-1. Download `BigMac-<version>-macos.zip` from [Releases](../../releases) and unzip it. Move `BigMac.app` to `/Applications`.
-2. The app is signed but not notarized. On first launch, right-click it and choose **Open**.
+1. Download `BigMac-<version>-macos.zip` from [Releases](../../releases/latest), unzip it, and move `BigMac.app` to `/Applications`.
+2. Open it. The app is signed and notarized by Apple, so macOS opens it without warnings.
 3. Optional: for a complete scan, add BigMac in **System Settings → Privacy & Security → Full Disk Access**.
 
 Requires macOS 14 or later.
@@ -42,7 +42,7 @@ swift run                         # dev build
 swift run BigMac --selftest /tmp/bigmac-test
 ```
 
-`NOTARY_PROFILE=<keychain-profile> ./make-app.sh` also notarizes, if you have Developer ID credentials stored with `xcrun notarytool store-credentials`.
+To notarize, set `NOTARY_PROFILE` (a profile saved with `xcrun notarytool store-credentials`) or `APPLE_ID`, `APPLE_APP_PASSWORD` and `APPLE_TEAM_ID` before running `make-app.sh`.
 
 ## Optional AI triage
 

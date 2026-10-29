@@ -51,11 +51,21 @@ else
 fi
 codesign --verify --strict --verbose=2 "$APP"
 
+# Notarize with a stored keychain profile (NOTARY_PROFILE) or an Apple ID + app-specific password
+# (APPLE_ID, APPLE_APP_PASSWORD, APPLE_TEAM_ID), then staple so it opens offline without a Gatekeeper prompt.
+NOTARY_AUTH=()
 if [[ -n "${NOTARY_PROFILE:-}" ]]; then
-  ZIP=build/BigMac.zip
+  NOTARY_AUTH=(--keychain-profile "$NOTARY_PROFILE")
+elif [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+  NOTARY_AUTH=(--apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID")
+fi
+if [[ ${#NOTARY_AUTH[@]} -gt 0 && "$SIGN_IDENTITY" != "-" ]]; then
+  ZIP=build/BigMac-notarize.zip
   ditto -c -k --norsrc --keepParent "$APP" "$ZIP"
-  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  echo "==> Notarizing (usually 1-5 min)"
+  xcrun notarytool submit "$ZIP" "${NOTARY_AUTH[@]}" --wait
   xcrun stapler staple "$APP"
+  xcrun stapler validate "$APP"
   rm -f "$ZIP"
 fi
 echo "Built $APP — run: open $APP"

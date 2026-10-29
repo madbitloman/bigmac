@@ -46,17 +46,19 @@ To notarize, set `NOTARY_PROFILE` (a profile saved with `xcrun notarytool store-
 
 ## Optional AI triage
 
-Both are off until you click them:
+Both are off until you click them.
 
-- **Ask Haiku** (Security): flagged audit items go to Claude Haiku on Amazon Bedrock through your `aws` CLI. They are sent under opaque ids, with secrets and your home path removed. A full audit costs well under a cent. A known-technique match can't be lowered by the model.
-- **Ask Jev** (Clean, Apps, Network): [TypeSafe Jev](https://docs.typesafe.ai) judges which caches are safe to delete and how suspicious a connection is. The API key is read from `TYPESAFE_API_KEY`, then the Keychain, then fetched once from AWS SSM.
+**Ask AI** (Security) sends flagged audit items to a model you choose. They go under opaque ids, with secrets and your home path removed. A known-technique match can't be lowered by the model. Pick a provider in **Settings → Security Audit**:
 
-Choose the AWS profile and SSM parameter (defaults: `default`, `/bigmac/typesafe-api-key`):
+| Provider | Setup |
+|---|---|
+| Amazon Bedrock | Your `aws` CLI profile (`defaults write com.bigmac.app awsProfile <profile>`) |
+| Anthropic API | Paste a key; Claude Haiku 5.5 costs well under a cent per audit |
+| OpenAI-compatible | Base URL, model id and key: OpenAI, OpenRouter, Groq, or a local Ollama or LM Studio (no key) |
 
-```sh
-defaults write com.bigmac.app awsProfile <profile>
-defaults write com.bigmac.app typesafeSSMName <parameter>
-```
+Keys are stored in your Keychain on this Mac only, or read from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`.
+
+**Ask Jev** (Clean, Apps, Network): [TypeSafe Jev](https://docs.typesafe.ai) judges which caches are safe to delete and how suspicious a connection is. Paste a key in Settings, set `TYPESAFE_API_KEY`, or fetch it once from AWS SSM (`defaults write com.bigmac.app typesafeSSMName <parameter>`).
 
 ## Limits
 

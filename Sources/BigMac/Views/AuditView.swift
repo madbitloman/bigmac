@@ -51,9 +51,9 @@ struct AuditView: View {
         PaneView(title: "Security Audit", status: model.status, busy: model.scanning || model.triaging) {
             FilterChip(title: "Suspicious", isOn: $onlySuspicious).disabled(!facets.isEmpty)
                 .help("Hide items with nothing to look at. The summary filters below override this.")
-            FilterChip(title: "Haiku triage", isOn: $model.triageAfterScan)
-                .help("After collecting, send flagged items (redacted, opaque ids) to Claude Haiku on Bedrock via the \(TypeSafeKey.awsProfile) profile")
-            Button { Task { await model.triage() } } label: { ActionLabel("Ask Haiku", symbol: "sparkle") }
+            FilterChip(title: "AI triage", isOn: $model.triageAfterScan)
+                .help("After collecting, send flagged items (redacted, opaque ids) to the model chosen in Settings: \(model.provider.title)")
+            Button { Task { await model.triage() } } label: { ActionLabel("Ask AI", symbol: "sparkle") }
                 .buttonStyle(.ghost).disabled(model.scanning || model.triaging || model.report.observations.isEmpty)
             Button { Task { await model.run() } } label: { ActionLabel("Run audit", key: "⌘R") }
                 .buttonStyle(.primary).keyboardShortcut("r").disabled(model.scanning || model.triaging)
@@ -185,7 +185,7 @@ struct AuditView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
                         Image(systemName: "sparkle").font(.system(size: 10)).foregroundStyle(Theme.accent)
-                        Text("Haiku").font(Theme.label).foregroundStyle(Theme.secondary)
+                        Text("AI").font(Theme.label).foregroundStyle(Theme.secondary)
                         if !verdict.atRisk.isEmpty, verdict.call != .benign {
                             Text("· at risk: \(verdict.atRisk)").font(Theme.label).foregroundStyle(Theme.secondary)
                         }
@@ -219,8 +219,8 @@ struct AuditView: View {
             ActionLabel(fp ? "Restore" : "Mark false positive", symbol: fp ? "arrow.uturn.backward" : "hand.thumbsup")
         }
         .buttonStyle(.ghost)
-        .help(fp ? "Count this item again and send it to Haiku on the next triage."
-                 : "Expected on this Mac. It drops to OK, stays hidden, and isn't sent to Haiku again.")
+        .help(fp ? "Count this item again and send it to the AI on the next triage."
+                 : "Expected on this Mac. It drops to OK, stays hidden, and isn't sent to the AI again.")
     }
 
     @ViewBuilder

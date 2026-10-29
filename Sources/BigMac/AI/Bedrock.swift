@@ -43,7 +43,7 @@ enum AWSCLI {
 }
 
 /// Bedrock Converse via the aws CLI, so it reuses whatever credentials the configured AWS profile has (keys or SSO).
-struct BedrockClient: Sendable {
+struct BedrockClient: ToolModel {
     static let models = [
         ("us.anthropic.claude-haiku-5-5", "Claude Haiku 5.5 — cheapest ($0.10 / $0.50 per M tokens)"),
         ("us.anthropic.claude-haiku-4-5-20251001-v1:0", "Claude Haiku 4.5 ($1 / $5 per M tokens)"),
@@ -53,10 +53,8 @@ struct BedrockClient: Sendable {
     var region = TypeSafeKey.awsRegion
     var model = models[0].0
 
-    struct Usage: Sendable { var input = 0, output = 0 }
+    typealias Usage = InferenceUsage
 
-    /// One forced tool call; returns the tool input. Fails unless the model actually stopped on the tool call,
-    /// so a response cut off by maxTokens is never mistaken for a verdict.
     func callTool(system: String, user: String, toolName: String, description: String,
                   schema: [String: Any], maxTokens: Int = 4096) throws -> ([String: Any], Usage) {
         var request: [String: Any] = [
@@ -232,14 +230,15 @@ enum AuditTriage {
     }
 
     /// Verdicts keyed by item id. Items beyond the call cap are skipped, not guessed; a failed batch doesn't discard the others.
-    static func triage(_ items: [AuditItem], client: BedrockClient) -> Outcome {
+    static func triage(_ items: [AuditItem], client: any ToolModel) -> Outcome {
         let ranked = items.sorted { $0.severity > $1.severity }
         let batches = stride(from: 0, to: ranked.count, by: batchSize).map { Array(ranked[$0..<min($0 + batchSize, ranked.count)]) }
         var outcome = Outcome(skipped: max(0, ranked.count - maxCalls * batchSize))
         for batch in batches.prefix(maxCalls) {
             do {
                 let (input, used) = try client.callTool(system: system, user: payload(batch), toolName: "report_findings",
-                                                        description: "Report one triage finding per observation id.", schema: schema)
+                                                        description: "Report one triage finding per observation id.", schema: schema,
+                                                        maxTokens: 4096)
                 outcome.usage.input += used.input
                 outcome.usage.output += used.output
                 outcome.verdicts.merge(parse(input, ids: batch.map(\.id))) { $1 }

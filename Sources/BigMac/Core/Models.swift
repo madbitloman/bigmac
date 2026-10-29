@@ -342,12 +342,41 @@ final class AuditModel {
     var triaging = false
     var status = "Runs only when you click Run audit."
     var triageAfterScan = true
+    var provider = InferenceProvider(rawValue: UserDefaults.standard.string(forKey: "inferenceProvider") ?? "") ?? .bedrock {
+        didSet {
+            UserDefaults.standard.set(provider.rawValue, forKey: "inferenceProvider")
+            if let first = provider.models.first, !provider.models.contains(where: { $0.0 == model }) { model = first.0 }
+        }
+    }
     var model = UserDefaults.standard.string(forKey: "bedrockModel") ?? BedrockClient.models[0].0 {
         didSet { UserDefaults.standard.set(model, forKey: "bedrockModel") }
     }
+    /// Only for the OpenAI-compatible provider.
+    var openAIBaseURL = UserDefaults.standard.string(forKey: "openAIBaseURL") ?? "https://api.openai.com/v1" {
+        didSet { UserDefaults.standard.set(openAIBaseURL, forKey: "openAIBaseURL") }
+    }
+    var openAIModel = UserDefaults.standard.string(forKey: "openAIModel") ?? "" {
+        didSet { UserDefaults.standard.set(openAIModel, forKey: "openAIModel") }
+    }
     var lastScan: Date?
 
-    var client: BedrockClient { BedrockClient(model: model) }
+    /// The configured model, or why it can't run yet.
+    var client: Result<any ToolModel, InferenceError> {
+        switch provider {
+        case .bedrock:
+            return .success(BedrockClient(model: model))
+        case .anthropic:
+            guard let key = InferenceKeys.resolve(.anthropic) else { return .failure(.init(message: "add an Anthropic API key in Settings")) }
+            return .success(AnthropicClient(model: model, key: key))
+        case .openai:
+            guard let url = URL(string: openAIBaseURL), url.scheme == "https" || url.host() == "localhost" || url.host() == "127.0.0.1" else {
+                return .failure(.init(message: "set an https base URL in Settings"))
+            }
+            guard !openAIModel.isEmpty else { return .failure(.init(message: "set a model id in Settings")) }
+            // Local servers (Ollama, LM Studio) usually need no key.
+            return .success(OpenAICompatibleClient(model: openAIModel, baseURL: url, key: InferenceKeys.resolve(.openai)))
+        }
+    }
 
     /// False positives the user marked, by fingerprint (value is the title, for display in Settings/debugging).
     /// Fingerprints are path-based, so marks survive rescans; dismissed items are never sent to Haiku.
@@ -387,16 +416,20 @@ final class AuditModel {
         triaging = true
         defer { triaging = false }
         summarize()
-        status += " · asking Haiku about \(items.count) items…"
-        let client = client
+        let client: any ToolModel
+        switch self.client {
+        case .success(let c): client = c
+        case .failure(let e): status += " · AI triage skipped: \(e.message)"; return
+        }
+        status += " · asking \(client.model) about \(items.count) items…"
         let outcome = await Task.detached { AuditTriage.triage(items, client: client) }.value
         verdicts = outcome.verdicts
         summarize()
-        let haiku5 = model.contains("haiku-5")
-        let cost = Double(outcome.usage.input) / 1e6 * (haiku5 ? 0.10 : 1) + Double(outcome.usage.output) / 1e6 * (haiku5 ? 0.50 : 5)
-        status += " · Haiku judged \(outcome.verdicts.count)/\(items.count)"
+        let tokens = outcome.usage.input + outcome.usage.output
+        let cost = listPrice(model: client.model).map { Double(outcome.usage.input) / 1e6 * $0.0 + Double(outcome.usage.output) / 1e6 * $0.1 }
+        status += " · AI judged \(outcome.verdicts.count)/\(items.count)"
             + (outcome.skipped > 0 ? " (\(outcome.skipped) skipped by call cap)" : "")
-            + " · \(outcome.usage.input + outcome.usage.output) tokens ≈ $\(String(format: "%.4f", cost)) list price"
+            + " · \(tokens) tokens" + (cost.map { " ≈ $\(String(format: "%.4f", $0)) list price" } ?? "")
         if let first = outcome.errors.first { status += " · \(outcome.errors.count) batch(es) failed: \(first)" }
     }
 

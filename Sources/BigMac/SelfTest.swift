@@ -39,6 +39,17 @@ enum SelfTest {
         check(dupActivity == .idle && dupGroups == 1, "overlapping duplicate scans run once and end idle (\(dupGroups) groups)")
         check(dupStatus.hasPrefix("1 duplicate groups"), "late progress can't overwrite the final status (\(dupStatus))")
 
+        print("System stats")
+        let stats = await MainActor.run { SystemStats() }
+        await MainActor.run { stats.sample() }
+        try? await Task.sleep(for: .milliseconds(300))
+        let (cpu, mem, disk) = await MainActor.run { stats.sample(); return (stats.cpu, stats.memory, stats.disk) }
+        check((0...1).contains(cpu), "CPU load in 0…100% (\(Int(cpu * 100))%)")
+        let accounted = mem.wired + mem.used + mem.compressed + mem.cache + mem.free
+        check(mem.wired > 0 && accounted > mem.total / 2 && accounted <= mem.total + mem.total / 10,
+              "memory split covers physical RAM (\(accounted >> 20) of \(mem.total >> 20) MB)")
+        check(disk.total > 0 && disk.used > 0 && disk.available > 0, "startup disk total/used/free read")
+
         print("Sizes & protection")
         let (size, _) = FS.allocatedSize(of: dir)
         check(size >= 3 * 2 * 1024 * 1024, "fixture size \(size.bytes)")

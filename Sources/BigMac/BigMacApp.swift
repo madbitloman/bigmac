@@ -37,6 +37,7 @@ struct BigMacApp: App {
     @State private var apps = AppsModel()
     @State private var network = NetworkModel()
     @State private var audit = AuditModel()
+    @State private var stats = SystemStats()
 
     var body: some Scene {
         Window("BigMac", id: "main") {
@@ -63,5 +64,6 @@ struct BigMacApp: App {
             .environment(apps)
             .environment(network)
             .environment(audit)
+            .environment(stats)
     }
 }

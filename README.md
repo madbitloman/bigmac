@@ -18,13 +18,13 @@ A small, native Mac cleaner with a network monitor and a security audit. It runs
 | **Apps** | Size, last used and leftover support files. Uninstalls to the Trash. |
 | **Network** | Who your apps talk to (`lsof`), with risk from the code signature, binary location and port. Take a single snapshot or watch live. |
 | **Security audit** | Read-only check for malware footholds: launch agents, cron, shell rc files, unsigned processes, proxy/DNS/root-certificate interception, profiles, remote-access tools, browser and system extensions, privacy grants, and Gatekeeper/SIP/FileVault/firewall posture. Matches known techniques (MITRE ATT&CK). Unwanted launch items can be removed fully: stopped, then moved to the Trash. |
-| **Menu bar** | The last results and one-click Run, Scan and Snapshot. |
+| **Menu bar** | An iStatistica-style glance at CPU, memory and disk (sampled only while open), how much BigMac can free, and one-click Run, Scan and Snapshot. |
 
 <p>
   <img src="docs/security.png" width="49%" alt="Security audit">
   <img src="docs/network.png" width="49%" alt="Network monitor">
 </p>
-<img src="docs/menubar.png" width="300" alt="Menu bar">
+<img src="docs/menubar.png" width="340" alt="Menu bar">
 
 ## Install
 

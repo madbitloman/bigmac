@@ -13,7 +13,7 @@ enum Snapshot {
 
         let jev = JevSettings(useKeychain: false),  // a Keychain prompt would block headless runs
              junk = JunkModel(), duplicates = DuplicatesModel(), apps = AppsModel()
-        let network = NetworkModel(), audit = AuditModel()
+        let network = NetworkModel(), audit = AuditModel(), stats = SystemStats()
         audit.triageAfterScan = false
         if arguments.contains("demo") {
             Demo.fill(junk: junk, duplicates: duplicates, apps: apps, network: network, audit: audit)
@@ -24,12 +24,18 @@ enum Snapshot {
             async let p: Void = apps.scan()
             _ = await (a, j, n, p)
         }
+        if arguments.contains("demo") {
+            stats.fillDemo()
+        } else {
+            // Readings a moment apart, so CPU load and its graph have something to show.
+            for _ in 0..<12 { stats.sample(); try? await Task.sleep(for: .milliseconds(150)) }
+        }
         print("data ready")
 
-        func render<V: View>(_ name: String, _ view: V, width: CGFloat = 1180, height: CGFloat = 760) {
+        func render<V: View>(_ name: String, _ view: V, width: CGFloat = 1180, height: CGFloat? = 760) {
             let root = view
                 .environment(jev).environment(junk).environment(duplicates).environment(apps)
-                .environment(network).environment(audit)
+                .environment(network).environment(audit).environment(stats)
                 .environment(\.colorScheme, dark ? .dark : .light)
                 .environment(\.snapshotMode, true)
                 .frame(width: width, height: height)
@@ -41,7 +47,7 @@ enum Snapshot {
             print("wrote \(name).png")
         }
         for pane in Pane.allCases { render(pane.rawValue.replacingOccurrences(of: " ", with: "-"), ContentView(initial: pane)) }
-        render("menubar", MenuBarPanel(), width: 320, height: 300)
+        render("menubar", MenuBarPanel(), width: 340, height: nil)  // natural height
         exit(0)
     }
 }

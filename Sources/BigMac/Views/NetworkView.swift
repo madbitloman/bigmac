@@ -46,14 +46,14 @@ struct NetworkView: View {
 
     var body: some View {
         @Bindable var model = model
-        PaneView(title: "Network", status: model.status, busy: model.running) {
+        PaneView(title: "Network", status: model.status, busy: model.busy) {
             FilterChip(title: "Flagged", isOn: $onlyFlagged).disabled(!levels.isEmpty || onlyTrusted)
             FilterChip(title: "Auto-Jev", isOn: $model.autoJev).disabled(jev.client == nil)
                 .help("Judge each new (binary, remote) pair with Jev. Results are cached, so polling doesn't re-bill.")
             Button { Task { await model.askJev(jev.client!) } } label: { ActionLabel("Ask Jev", symbol: "brain") }
                 .buttonStyle(.ghost).disabled(jev.client == nil || model.rows.isEmpty)
             Button { Task { await model.refresh() } } label: { ActionLabel("Snapshot", key: "⌘R") }
-                .buttonStyle(.ghost).keyboardShortcut("r").disabled(model.running)
+                .buttonStyle(.ghost).keyboardShortcut("r").disabled(model.busy)
             Button { model.running ? model.stop() : model.start(jev: jev) } label: {
                 ActionLabel(model.running ? "Stop" : "Watch", symbol: model.running ? "pause.fill" : "play.fill")
             }

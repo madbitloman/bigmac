@@ -137,16 +137,16 @@ enum Removal {
 
     /// Stops the item and moves the selected targets to the Trash. Blocks while the admin prompt is open: call off the main actor.
     static func execute(_ plan: RemovalPlan, selected: Set<String>) -> Outcome {
-        var out0 = Outcome()
+        var out = Outcome()
         // Re-check now: files can change between opening the sheet and confirming it.
         let targets = plan.targets.filter { selected.contains($0.id) }.filter { t in
             if isSafe(t.url) { return true }
-            out0.failed.append((t.url, "skipped: path changed or is not safe to remove"))
+            out.failed.append((t.url, "skipped: path changed or is not safe to remove"))
             return false
         }
         if let hook = plan.preflight, let program = plan.program {
             let ok = Shell.run(program, hook.args, timeout: 30, anyStatus: true) != nil
-            out0.log.append("\(hook.why): \(ok ? "done" : "failed")")
+            out.log.append("\(hook.why): \(ok ? "done" : "failed")")
         }
         let system = !plan.plist.path.hasPrefix(FS.home.path)
         var admin: [String] = []
@@ -155,7 +155,6 @@ enum Removal {
         } else {
             _ = Shell.run("/bin/launchctl", ["bootout", "gui/\(getuid())", plan.plist.path], anyStatus: true)
         }
-        var out = out0
         if let program = plan.program {
             let pattern = exactProgramPattern(program)
             _ = Shell.run("/usr/bin/pkill", ["-f", "--", pattern], anyStatus: true)

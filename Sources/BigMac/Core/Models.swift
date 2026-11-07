@@ -6,36 +6,63 @@ import Observation
 
 @MainActor @Observable
 final class JevSettings {
-    var client: TypeSafeClient?
-    var status = "Not configured"
-    var busy = false
+    /// A failed fetch keeps whatever key was already working, so the status can't claim one thing while the client does another.
+    enum State {
+        case notConfigured
+        case fetching(previous: TypeSafeClient?)
+        case connected(TypeSafeClient, source: String)
+        case failed(String, previous: TypeSafeClient?)
+    }
+    private(set) var state = State.notConfigured
+
+    var client: TypeSafeClient? {
+        switch state {
+        case .notConfigured: nil
+        case .fetching(let c), .failed(_, let c): c
+        case .connected(let c, _): c
+        }
+    }
+    var status: String {
+        switch state {
+        case .notConfigured: "Not configured"
+        case .fetching: "Fetching from AWS…"
+        case .connected(_, let source): "Connected (\(source))"
+        case .failed(let message, _): message
+        }
+    }
+    var busy: Bool { if case .fetching = state { true } else { false } }
 
     init(useKeychain: Bool = true) {
         if let key = TypeSafeKey.resolveLocal(useKeychain: useKeychain) { connect(key, source: "local") }
     }
 
     func connect(_ key: String, source: String) {
-        client = TypeSafeClient(apiKey: key)
-        status = "Connected (\(source))"
+        state = .connected(TypeSafeClient(apiKey: key), source: source)
     }
 
     func fetchFromAWS() async {
-        busy = true
-        defer { busy = false }
+        guard !busy else { return }
+        let previous = client
+        state = .fetching(previous: previous)
         do {
             let key = try await Task.detached { try TypeSafeKey.fetchFromAWS() }.value
             TypeSafeKey.keychainSave(key)
             connect(key, source: "AWS \(TypeSafeKey.awsProfile) → Keychain")
         } catch {
-            status = error.localizedDescription
+            state = .failed(error.localizedDescription, previous: previous)
         }
     }
 
     func disconnect() {
         TypeSafeKey.keychainDelete()
-        client = nil
-        status = "Not configured"
+        state = .notConfigured
     }
+}
+
+/// What a model is doing right now. One action at a time per pane: a second click while one runs is ignored,
+/// so a rescan can't clear results under a running trash, or overwrite them with a half-finished pass.
+enum Activity: Equatable {
+    case idle, scanning, askingJev, trashing
 }
 
 // MARK: - Smart clean
@@ -45,15 +72,25 @@ final class JunkModel {
     var results: [JunkCategory: CategoryResult] = [:]
     var selected: Set<URL> = []
     var jev: [URL: JevJudgments.Verdict] = [:]
-    var scanning = false
+    private(set) var activity = Activity.idle
     var status = ""
+
+    var scanning: Bool { activity == .scanning }
+    var busy: Bool { activity != .idle }
+
+    private func begin(_ a: Activity) -> Bool {
+        guard activity == .idle else { return false }
+        activity = a
+        return true
+    }
 
     var allItems: [JunkItem] { JunkCategory.allCases.flatMap { results[$0]?.items ?? [] } }
     var selectedBytes: Int64 { allItems.filter { selected.contains($0.url) }.reduce(0) { $0 + $1.size } }
     var anyDenied: Bool { results.values.contains { $0.denied } }
 
     func scan() async {
-        scanning = true
+        guard begin(.scanning) else { return }
+        defer { activity = .idle }
         selected = []
         jev = [:]
         results = [:]
@@ -63,7 +100,6 @@ final class JunkModel {
         }
         dropOverlaps()
         status = "Found \(allItems.reduce(0) { $0 + $1.size }.bytes) in \(allItems.count) items"
-        scanning = false
     }
 
     /// An item can show up in two categories (e.g. CocoaPods cache, or an old *and* large download);
@@ -87,6 +123,8 @@ final class JunkModel {
     }
 
     func askJev(_ client: TypeSafeClient) async {
+        guard begin(.askingJev) else { return }
+        defer { activity = .idle }
         // Downloads/large files are never auto-selected, so don't send personal filenames for them.
         let items = allItems.filter { !$0.needsReview && $0.docker == nil }
         status = "Asking Jev about \(items.count) items…"
@@ -101,6 +139,8 @@ final class JunkModel {
     }
 
     func trashSelected() async {
+        guard begin(.trashing) else { return }
+        defer { activity = .idle }
         let chosen = allItems.filter { selected.contains($0.url) && $0.blocked == nil }
         let files = chosen.filter { $0.docker == nil }.map { (url: $0.url, size: $0.size) }
         let docker = chosen.filter { $0.docker != nil }
@@ -129,24 +169,29 @@ final class DuplicatesModel {
     var minSizeMB: Double = 1
     var groups: [DuplicateGroup] = []
     var selected: Set<URL> = []
-    var scanning = false
+    private(set) var activity = Activity.idle
     var status = ""
+
+    var scanning: Bool { activity == .scanning }
+    var busy: Bool { activity != .idle }
 
     var wasted: Int64 { groups.reduce(0) { $0 + $1.wasted } }
 
     func scan() async {
-        scanning = true
+        guard activity == .idle else { return }
+        activity = .scanning
+        defer { activity = .idle }
         selected = []
         groups = []
         let roots = roots, minSize = Int64(minSizeMB * 1024 * 1024)
         let found = await Task.detached {
             DuplicateFinder.find(roots: roots, minSize: minSize) { message in
-                Task { @MainActor in self.status = message }
+                // Progress hops to the main actor later; drop any that arrive after the scan has finished.
+                Task { @MainActor in if self.activity == .scanning { self.status = message } }
             }
         }.value
         groups = found
         status = "\(found.count) duplicate groups · \(wasted.bytes) reclaimable"
-        scanning = false
     }
 
     /// Keeps the oldest copy in each group and selects the rest.
@@ -163,6 +208,9 @@ final class DuplicatesModel {
     }
 
     func trashSelected() async {
+        guard activity == .idle else { return }
+        activity = .trashing
+        defer { activity = .idle }
         // Never let every copy in a group go.
         var targets: [(url: URL, size: Int64)] = []
         for group in groups {
@@ -190,21 +238,32 @@ final class AppsModel {
     var jevRisk: [URL: JevJudgments.Verdict] = [:]
     var unusedDays = 90
     var onlyUnused = false
-    var scanning = false
+    private(set) var activity = Activity.idle
     var status = ""
+
+    var scanning: Bool { activity == .scanning }
+    var busy: Bool { activity != .idle }
+
+    private func begin(_ a: Activity) -> Bool {
+        guard activity == .idle else { return false }
+        activity = a
+        return true
+    }
 
     var visible: [AppInfo] { onlyUnused ? apps.filter { $0.isUnused(days: unusedDays) } : apps }
 
     func scan() async {
-        scanning = true
+        guard begin(.scanning) else { return }
+        defer { activity = .idle }
         status = "Scanning applications…"
         apps = await Task.detached { AppScanner.scan() }.value
         let unused = apps.filter { $0.isUnused(days: unusedDays) }
         status = "\(apps.count) apps · \(unused.count) unused for \(unusedDays)+ days (\(unused.reduce(0) { $0 + $1.size }.bytes))"
-        scanning = false
     }
 
     func askJev(_ client: TypeSafeClient) async {
+        guard begin(.askingJev) else { return }
+        defer { activity = .idle }
         let targets = apps.filter { $0.removable && !$0.isApple }
         status = "Asking Jev about \(targets.count) apps…"
         do {
@@ -217,6 +276,8 @@ final class AppsModel {
     }
 
     func uninstall(_ app: AppInfo, includeLeftovers: Bool) async {
+        guard begin(.trashing) else { return }
+        defer { activity = .idle }
         var targets = [(url: app.url, size: app.size)]
         if includeLeftovers { targets += app.leftovers.map { ($0, Int64(0)) } }
         let result = await Task.detached { FS.trash(targets) }.value
@@ -249,7 +310,13 @@ final class NetworkModel {
     var rows: [ConnectionRow] = []
     // Nothing polls until the user clicks Snapshot or Watch.
     var jev: [String: JevJudgments.Verdict] = [:]  // keyed by exe+remote so polling doesn't re-bill
-    var running = false
+    enum Mode: Equatable { case idle, snapshot, watching }
+    /// `watching` owns the polling task; a snapshot never overlaps it or another snapshot.
+    private(set) var mode = Mode.idle
+    var running: Bool { mode == .watching }
+    var busy: Bool { mode != .idle }
+    /// Independent of `mode`: Jev can judge the rows on screen while watching, but only one request at a time.
+    private var judging = false
     var autoJev = false
     var interval: Double = 5
     var status = "Click Snapshot for one reading, or Watch to poll every few seconds."
@@ -273,11 +340,11 @@ final class NetworkModel {
     }
 
     func start(jev settings: JevSettings) {
-        guard loop == nil else { return }
-        running = true
+        guard mode == .idle else { return }
+        mode = .watching
         loop = Task { [weak self] in
             while !Task.isCancelled, let self {
-                await self.refresh()
+                await self.read()
                 if self.autoJev, let client = settings.client { await self.askJev(client, onlyUnjudged: true) }
                 try? await Task.sleep(for: .seconds(self.interval))
             }
@@ -287,10 +354,18 @@ final class NetworkModel {
     func stop() {
         loop?.cancel()
         loop = nil
-        running = false
+        mode = .idle
     }
 
+    /// One reading (the Snapshot button). Ignored while watching, since the loop is already reading.
     func refresh() async {
+        guard mode == .idle else { return }
+        mode = .snapshot
+        defer { mode = .idle }
+        await read()
+    }
+
+    private func read() async {
         do {
             let connections = try await Task.detached { try Lsof.connections() }.value
             var fresh: [ConnectionRow] = []
@@ -320,7 +395,9 @@ final class NetworkModel {
         // One row per unique (binary, remote) pair.
         var seen = Set<String>()
         let targets = rows.filter { (!onlyUnjudged || jev[$0.jevKey] == nil) && seen.insert($0.jevKey).inserted }
-        guard !targets.isEmpty else { return }
+        guard !targets.isEmpty, !judging else { return }
+        judging = true
+        defer { judging = false }
         do {
             let verdicts = try await JevJudgments.judgeConnections(targets, client: client)
             for (row, v) in zip(targets, verdicts) { jev[row.jevKey] = v }
@@ -338,10 +415,30 @@ final class NetworkModel {
 final class AuditModel {
     var report = AuditReport()
     var verdicts: [String: AuditVerdict] = [:]
-    var scanning = false
-    var triaging = false
-    var status = "Runs only when you click Run audit."
+    /// Collecting, triaging and removing never overlap: a new audit mid-triage would get the old report's verdicts,
+    /// and a second removal would open a second admin prompt.
+    enum Phase: Equatable {
+        case idle
+        case collecting
+        case triaging(model: String, items: Int)
+        case removing
+    }
+    private(set) var phase = Phase.idle
+    /// Outcome of the last AI triage, shown after the summary until the next audit.
+    private var triageNote: String?
     var triageAfterScan = true
+
+    var scanning: Bool { phase == .collecting }
+    var busy: Bool { phase != .idle }
+
+    var status: String {
+        switch phase {
+        case .collecting: return "Collecting evidence…"
+        case .triaging(let model, let items): return summary + " · asking \(model) about \(items) items…"
+        case .removing: return summary + " · removing…"
+        case .idle: return lastScan == nil ? "Runs only when you click Run audit." : summary + (triageNote ?? "")
+        }
+    }
     var provider = InferenceProvider(rawValue: UserDefaults.standard.string(forKey: "inferenceProvider") ?? "") ?? .bedrock {
         didSet {
             UserDefaults.standard.set(provider.rawValue, forKey: "inferenceProvider")
@@ -388,7 +485,6 @@ final class AuditModel {
 
     func setDismissed(_ o: AuditItem, _ on: Bool) {
         dismissed[o.id] = on ? o.title : nil
-        summarize()
     }
 
     /// Haiku's call wins over the heuristic once it has judged an item; a false-positive mark wins over both.
@@ -400,44 +496,42 @@ final class AuditModel {
     }
 
     func run() async {
-        scanning = true
-        status = "Collecting evidence…"
+        guard phase == .idle else { return }
+        phase = .collecting
         verdicts = [:]
+        triageNote = nil
         report = await Task.detached { await HostAudit.run() }.value
-        scanning = false
         lastScan = Date()
-        summarize()
+        phase = .idle
         if triageAfterScan { await triage() }
     }
 
     func triage() async {
+        guard phase == .idle else { return }
         let items = AuditTriage.candidates(report.observations.filter { !isDismissed($0) })
         guard !items.isEmpty else { return }
-        triaging = true
-        defer { triaging = false }
-        summarize()
         let client: any ToolModel
         switch self.client {
         case .success(let c): client = c
-        case .failure(let e): status += " · AI triage skipped: \(e.message)"; return
+        case .failure(let e): triageNote = " · AI triage skipped: \(e.message)"; return
         }
-        status += " · asking \(client.model) about \(items.count) items…"
+        phase = .triaging(model: client.model, items: items.count)
         let outcome = await Task.detached { AuditTriage.triage(items, client: client) }.value
         verdicts = outcome.verdicts
-        summarize()
+        phase = .idle
         let tokens = outcome.usage.input + outcome.usage.output
         let cost = listPrice(model: client.model).map { Double(outcome.usage.input) / 1e6 * $0.0 + Double(outcome.usage.output) / 1e6 * $0.1 }
-        status += " · AI judged \(outcome.verdicts.count)/\(items.count)"
+        triageNote = " · AI judged \(outcome.verdicts.count)/\(items.count)"
             + (outcome.skipped > 0 ? " (\(outcome.skipped) skipped by call cap)" : "")
             + " · \(tokens) tokens" + (cost.map { " ≈ $\(String(format: "%.4f", $0)) list price" } ?? "")
-        if let first = outcome.errors.first { status += " · \(outcome.errors.count) batch(es) failed: \(first)" }
+            + (outcome.errors.first.map { " · \(outcome.errors.count) batch(es) failed: \($0)" } ?? "")
     }
 
-    func summarize() {
+    private var summary: String {
         let levels = report.observations.map(severity)
         let high = levels.filter { $0 == .high }.count, medium = levels.filter { $0 == .medium }.count
         let fp = report.observations.filter(isDismissed).count
-        status = "\(report.observations.count) observations · \(high) high · \(medium) medium"
+        return "\(report.observations.count) observations · \(high) high · \(medium) medium"
             + (fp > 0 ? " · \(fp) false positive\(fp == 1 ? "" : "s")" : "")
             + (lastScan.map { " · \($0.formatted(date: .omitted, time: .shortened))" } ?? "")
     }
@@ -459,9 +553,11 @@ final class AuditModel {
 
     /// Full removal (stop, vendor cleanup, Trash). May show the macOS admin prompt for root-owned files.
     func remove(_ o: AuditItem, plan: RemovalPlan, selected: Set<String>) async -> String {
+        guard phase == .idle else { return "\(plan.label): wait for the current audit step to finish, then try again." }
+        phase = .removing
+        defer { phase = .idle }
         let outcome = await Task.detached { Removal.execute(plan, selected: selected) }.value
         if outcome.failed.isEmpty { report.observations.removeAll { $0.id == o.id } }
-        summarize()
         var parts = outcome.log
         if !outcome.removed.isEmpty { parts.append("Moved \(outcome.removed.count) item\(outcome.removed.count == 1 ? "" : "s") to the Trash") }
         if !outcome.failed.isEmpty {

@@ -15,10 +15,10 @@ struct AppsView: View {
             }
             .labelsHidden().pickerStyle(.menu).fixedSize()
             Button { Task { await model.askJev(jev.client!) } } label: { ActionLabel("Ask Jev", symbol: "brain") }
-                .buttonStyle(.ghost).disabled(jev.client == nil || model.apps.isEmpty)
+                .buttonStyle(.ghost).disabled(jev.client == nil || model.apps.isEmpty || model.busy)
                 .help("Ask Jev which apps look like drivers or security tools other things depend on")
             Button { Task { await model.scan() } } label: { ActionLabel("Scan", key: "⌘R") }
-                .buttonStyle(.primary).keyboardShortcut("r").disabled(model.scanning)
+                .buttonStyle(.primary).keyboardShortcut("r").disabled(model.busy)
         } content: {
             if model.apps.isEmpty && !model.scanning {
                 EmptyState(symbol: "square.grid.2x2", title: "No apps scanned",
@@ -50,7 +50,7 @@ struct AppsView: View {
                                 }
                                 .frame(width: 80, alignment: .trailing)
                                 Button { pending = app } label: { ActionLabel("Uninstall") }
-                                    .buttonStyle(.ghost).disabled(!app.removable)
+                                    .buttonStyle(.ghost).disabled(!app.removable || model.busy)
                             }
                             .contextMenu { Button("Reveal in Finder") { revealInFinder(app.url) } }
                         }

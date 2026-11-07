@@ -12,14 +12,14 @@ struct CleanView: View {
         PaneView(title: "Smart Clean", status: model.status, busy: model.scanning) {
             Button { Task { await model.askJev(jev.client!) } } label: { ActionLabel("Ask Jev", symbol: "brain") }
                 .buttonStyle(.ghost)
-                .disabled(jev.client == nil || model.allItems.isEmpty || model.scanning)
+                .disabled(jev.client == nil || model.allItems.isEmpty || model.busy)
                 .help("Sends item paths to TypeSafe Jev to judge which are safe to delete")
             Button { model.selectRecommended() } label: { ActionLabel("Select safe") }
                 .buttonStyle(.ghost).disabled(model.allItems.isEmpty)
             Button { Task { await model.scan() } } label: { ActionLabel("Scan", key: "⌘R") }
-                .buttonStyle(.ghost).keyboardShortcut("r").disabled(model.scanning)
+                .buttonStyle(.ghost).keyboardShortcut("r").disabled(model.busy)
             Button { confirm = true } label: { ActionLabel(model.selected.isEmpty ? "Trash" : "Trash \(model.selectedBytes.bytes)", symbol: "trash") }
-                .buttonStyle(.primary).disabled(model.selected.isEmpty)
+                .buttonStyle(.primary).disabled(model.selected.isEmpty || model.busy)
         } content: {
             VStack(spacing: 0) {
                 if model.anyDenied { FDACallout() }

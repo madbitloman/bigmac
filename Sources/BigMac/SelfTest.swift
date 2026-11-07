@@ -28,6 +28,17 @@ enum SelfTest {
         check(groups.first?.files.count == 2, "group has 2 files after hardlink/symlink collapse (got \(groups.first?.files.map(\.lastPathComponent) ?? []))")
         check(!(groups.first?.files.contains { $0.lastPathComponent == "c.bin" } ?? true), "near-identical c.bin excluded")
 
+        print("State machines")
+        let dupes = await MainActor.run { DuplicatesModel() }
+        await MainActor.run { dupes.roots = [dir]; dupes.minSizeMB = 0.001 }
+        async let first: Void = dupes.scan()
+        async let second: Void = dupes.scan()  // ignored: a scan is already running
+        _ = await (first, second)
+        try? await Task.sleep(for: .milliseconds(300))  // let any late progress messages land
+        let (dupStatus, dupActivity, dupGroups) = await MainActor.run { (dupes.status, dupes.activity, dupes.groups.count) }
+        check(dupActivity == .idle && dupGroups == 1, "overlapping duplicate scans run once and end idle (\(dupGroups) groups)")
+        check(dupStatus.hasPrefix("1 duplicate groups"), "late progress can't overwrite the final status (\(dupStatus))")
+
         print("Sizes & protection")
         let (size, _) = FS.allocatedSize(of: dir)
         check(size >= 3 * 2 * 1024 * 1024, "fixture size \(size.bytes)")

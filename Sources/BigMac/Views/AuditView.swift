@@ -8,20 +8,28 @@ struct AuditView: View {
     @State private var onlySuspicious = true
     @State private var facets: Set<Facet> = []
     @State private var expanded: Set<String> = []
-    @State private var trashTarget: AuditItem?
-    @State private var removing: Removing?
-
-    struct Removing: Identifiable {
-        var id: String { item.id }
-        let item: AuditItem
-        let plan: RemovalPlan
+    /// At most one confirmation is open at a time: the removal sheet, a move-to-Trash dialog, or a quit dialog.
+    enum Confirming {
+        case remove(AuditItem, RemovalPlan)
+        case trash(AuditItem)
+        case quit(AuditItem)
     }
+    @State private var confirming: Confirming?
+    @State private var message: String?
 
     private func startRemoval(_ o: AuditItem) {
-        if let plan = model.removalPlan(o) { removing = Removing(item: o, plan: plan) } else { trashTarget = o }
+        confirming = model.removalPlan(o).map { .remove(o, $0) } ?? .trash(o)
     }
-    @State private var quitTarget: AuditItem?
-    @State private var message: String?
+
+    private var removing: Binding<RemovalRequest?> {
+        Binding(get: { if case .remove(let o, let plan) = confirming { RemovalRequest(item: o, plan: plan) } else { nil } },
+                set: { if $0 == nil { confirming = nil } })
+    }
+    private var trashTarget: AuditItem? { if case .trash(let o) = confirming { o } else { nil } }
+    private var quitTarget: AuditItem? { if case .quit(let o) = confirming { o } else { nil } }
+    private func dialog(_ shown: Bool) -> Binding<Bool> {
+        Binding(get: { shown }, set: { if !$0 { confirming = nil } })
+    }
 
     private var visible: [AuditItem] {
         let levels = Set(facets.compactMap { if case .level(let l) = $0 { l } else { nil } })
@@ -48,15 +56,15 @@ struct AuditView: View {
 
     var body: some View {
         @Bindable var model = model
-        PaneView(title: "Security Audit", status: model.status, busy: model.scanning || model.triaging) {
+        PaneView(title: "Security Audit", status: model.status, busy: model.busy) {
             FilterChip(title: "Suspicious", isOn: $onlySuspicious).disabled(!facets.isEmpty)
                 .help("Hide items with nothing to look at. The summary filters below override this.")
             FilterChip(title: "AI triage", isOn: $model.triageAfterScan)
                 .help("After collecting, send flagged items (redacted, opaque ids) to the model chosen in Settings: \(model.provider.title)")
             Button { Task { await model.triage() } } label: { ActionLabel("Ask AI", symbol: "sparkle") }
-                .buttonStyle(.ghost).disabled(model.scanning || model.triaging || model.report.observations.isEmpty)
+                .buttonStyle(.ghost).disabled(model.busy || model.report.observations.isEmpty)
             Button { Task { await model.run() } } label: { ActionLabel("Run audit", key: "⌘R") }
-                .buttonStyle(.primary).keyboardShortcut("r").disabled(model.scanning || model.triaging)
+                .buttonStyle(.primary).keyboardShortcut("r").disabled(model.busy)
         } content: {
             VStack(spacing: 0) {
                 if let message { Callout(symbol: "info.circle", text: message, tint: Theme.blue, actionTitle: "Dismiss") { self.message = nil } }
@@ -103,19 +111,19 @@ struct AuditView: View {
                 }
             }
         }
-        .sheet(item: $removing) { r in
+        .sheet(item: removing) { r in
             RemovalSheet(plan: r.plan) { selected in
-                removing = nil
+                confirming = nil
                 Task { message = await model.remove(r.item, plan: r.plan, selected: selected) }
-            } cancel: { removing = nil }
+            } cancel: { confirming = nil }
         }
-        .confirmationDialog("Move \(trashTarget?.path?.lastPathComponent ?? "") to the Trash?", isPresented: Binding(get: { trashTarget != nil }, set: { if !$0 { trashTarget = nil } })) {
-            Button("Move to Trash", role: .destructive) { if let t = trashTarget { message = model.trash(t) }; trashTarget = nil }
+        .confirmationDialog("Move \(trashTarget?.path?.lastPathComponent ?? "") to the Trash?", isPresented: dialog(trashTarget != nil)) {
+            Button("Move to Trash", role: .destructive) { if let t = trashTarget { message = model.trash(t) }; confirming = nil }
         } message: {
             Text("It stays in the Trash until you empty it. Already-running copies keep running until you log out or quit them.")
         }
-        .confirmationDialog("Send SIGTERM to \(quitTarget?.title ?? "") (pid \(quitTarget?.pid ?? 0))?", isPresented: Binding(get: { quitTarget != nil }, set: { if !$0 { quitTarget = nil } })) {
-            Button("Quit process", role: .destructive) { if let t = quitTarget { model.quit(t) }; quitTarget = nil }
+        .confirmationDialog("Send SIGTERM to \(quitTarget?.title ?? "") (pid \(quitTarget?.pid ?? 0))?", isPresented: dialog(quitTarget != nil)) {
+            Button("Quit process", role: .destructive) { if let t = quitTarget { model.quit(t) }; confirming = nil }
         }
     }
 
@@ -201,10 +209,10 @@ struct AuditView: View {
             HStack(spacing: 6) {
                 if let url = o.path { Button { revealInFinder(url) } label: { ActionLabel("Reveal", symbol: "folder") }.buttonStyle(.ghost) }
                 if o.kind == .persistence, let url = o.path, url.pathExtension == "plist" {
-                    Button { startRemoval(o) } label: { ActionLabel("Remove…", symbol: "trash") }.buttonStyle(.ghost)
+                    Button { startRemoval(o) } label: { ActionLabel("Remove…", symbol: "trash") }.buttonStyle(.ghost).disabled(model.busy)
                 }
                 if let pid = o.pid, [.process, .network].contains(o.kind) {
-                    Button { quitTarget = o } label: { ActionLabel("Quit \(pid)", symbol: "xmark.octagon") }.buttonStyle(.ghost)
+                    Button { confirming = .quit(o) } label: { ActionLabel("Quit \(pid)", symbol: "xmark.octagon") }.buttonStyle(.ghost)
                 }
                 Button { copy(o) } label: { ActionLabel("Copy", symbol: "doc.on.doc") }.buttonStyle(.ghost)
                 Spacer()
@@ -233,7 +241,7 @@ struct AuditView: View {
             Button("Remove launch item and what it installed…", role: .destructive) { startRemoval(o) }
         }
         if let pid = o.pid, [.process, .network].contains(o.kind) {
-            Button("Quit process \(pid)…", role: .destructive) { quitTarget = o }
+            Button("Quit process \(pid)…", role: .destructive) { confirming = .quit(o) }
         }
     }
 
@@ -254,6 +262,12 @@ extension AuditVerdict.Call {
 }
 
 /// Confirms a full removal: what gets stopped, what goes to the Trash, and whether macOS will ask for a password.
+struct RemovalRequest: Identifiable {
+    var id: String { item.id }
+    let item: AuditItem
+    let plan: RemovalPlan
+}
+
 struct RemovalSheet: View {
     let plan: RemovalPlan
     let confirm: (Set<String>) -> Void

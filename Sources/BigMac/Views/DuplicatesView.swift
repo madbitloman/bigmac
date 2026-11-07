@@ -11,9 +11,9 @@ struct DuplicatesView: View {
                 .buttonStyle(.ghost).disabled(model.groups.isEmpty)
                 .help("Select every copy except the oldest in each group")
             Button { Task { await model.scan() } } label: { ActionLabel("Scan", key: "⌘R") }
-                .buttonStyle(.ghost).keyboardShortcut("r").disabled(model.scanning || model.roots.isEmpty)
+                .buttonStyle(.ghost).keyboardShortcut("r").disabled(model.busy || model.roots.isEmpty)
             Button { confirm = true } label: { ActionLabel(model.selected.isEmpty ? "Trash" : "Trash \(model.selected.count)", symbol: "trash") }
-                .buttonStyle(.primary).disabled(model.selected.isEmpty)
+                .buttonStyle(.primary).disabled(model.selected.isEmpty || model.busy)
         } content: {
             VStack(spacing: 0) {
                 HStack(spacing: 6) {

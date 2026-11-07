@@ -21,18 +21,18 @@ struct MenuBarPanel: View {
             .padding(.horizontal, 12).frame(height: 44)
             Hairline()
 
-            item("Security Audit", "shield.lefthalf.filled", auditSummary, busy: audit.scanning || audit.triaging, action: "Run") {
+            item("Security Audit", "shield.lefthalf.filled", auditSummary, busy: audit.busy, action: "Run") {
                 Task { await audit.run() }
             }
-            item("Smart Clean", "sparkles", junkSummary, busy: junk.scanning, action: "Scan") {
+            item("Smart Clean", "sparkles", junkSummary, busy: junk.busy, action: "Scan") {
                 Task { await junk.scan() }
             }
-            item("Network", "point.3.connected.trianglepath.dotted", networkSummary, busy: false,
+            item("Network", "point.3.connected.trianglepath.dotted", networkSummary, busy: network.mode == .snapshot,
                  action: network.running ? "Stop" : "Snapshot") {
                 if network.running { network.stop() } else { Task { await network.refresh() } }
             }
             item("Duplicates", "square.on.square", duplicates.groups.isEmpty ? ("Not scanned", Theme.tertiary) : ("\(duplicates.wasted.bytes) reclaimable", Theme.secondary),
-                 busy: duplicates.scanning, action: "Scan") {
+                 busy: duplicates.busy, action: "Scan") {
                 Task { await duplicates.scan() }
             }
 

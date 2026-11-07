@@ -95,6 +95,5 @@ enum Demo {
             "browser:tabtools": AuditVerdict(call: .benign, severity: .none, atRisk: "", rationale: "No host access; only tabs and storage.", action: "None."),
         ]
         audit.lastScan = Date(timeIntervalSince1970: 1_761_756_000)
-        audit.summarize()
     }
 }

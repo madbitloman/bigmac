@@ -24,7 +24,7 @@ A small, native Mac cleaner with a network monitor and a security audit. It runs
   <img src="docs/security.png" width="49%" alt="Security audit">
   <img src="docs/network.png" width="49%" alt="Network monitor">
 </p>
-<img src="docs/menubar.png" width="340" alt="Menu bar">
+<img src="docs/menubar.png" width="400" alt="Menu bar">
 
 ## Install
 

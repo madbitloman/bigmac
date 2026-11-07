@@ -20,7 +20,7 @@ struct MenuBarPanel: View {
             footer
         }
         .padding(12)
-        .frame(width: 340)
+        .frame(width: 400)
         .background(Theme.canvas)
         .onAppear { stats.start() }
         .onDisappear { stats.stop() }
@@ -30,10 +30,10 @@ struct MenuBarPanel: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            LogoBadge(size: 30)
+            LogoBadge(size: 38)
             VStack(alignment: .leading, spacing: 1) {
-                Text(stats.chip.isEmpty ? stats.model : stats.chip).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.text)
-                Text("\(stats.model) · up \(Self.uptime(stats.uptime))").font(Theme.small).foregroundStyle(Theme.secondary)
+                Text(stats.chip.isEmpty ? stats.model : stats.chip).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
+                Text("\(stats.model) · up \(Self.uptime(stats.uptime))").font(P.small).foregroundStyle(Theme.secondary)
             }
             Spacer()
             Button { openMain() } label: { ActionLabel("Open", key: "⌘O") }
@@ -46,13 +46,13 @@ struct MenuBarPanel: View {
 
     private var summaryCard: some View {
         Card("Summary") {
-            HStack(spacing: 18) {
+            HStack(spacing: 22) {
                 ZStack {
-                    Ring(value: stats.cpu, color: Palette.cpu, diameter: 92)
-                    Ring(value: stats.memory.pressure, color: Palette.ram, diameter: 70)
-                    Ring(value: stats.disk.fraction, color: Palette.ssd, diameter: 48)
+                    Ring(value: stats.cpu, color: Palette.cpu, diameter: 124)
+                    Ring(value: stats.memory.pressure, color: Palette.ram, diameter: 96)
+                    Ring(value: stats.disk.fraction, color: Palette.ssd, diameter: 68)
                 }
-                .frame(width: 92, height: 92)
+                .frame(width: 124, height: 124)
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 18) {
                         BigStat("CPU", Self.percent(stats.cpu), Palette.cpu)
@@ -66,7 +66,7 @@ struct MenuBarPanel: View {
                 Spacer(minLength: 0)
             }
             CPUBars(history: stats.cpuHistory)
-                .frame(height: 30)
+                .frame(height: 44)
             HStack(spacing: 14) {
                 Legend(Palette.user, "User", Self.percent(stats.cpuUser))
                 Legend(Palette.system, "System", Self.percent(stats.cpuSystem))
@@ -126,10 +126,10 @@ struct MenuBarPanel: View {
 
     private var footer: some View {
         HStack {
-            Text("Scans run only when you ask").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
+            Text("Scans run only when you ask").font(.system(size: 12)).foregroundStyle(Theme.tertiary)
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
-                .buttonStyle(.plain).font(Theme.small).foregroundStyle(Theme.secondary).keyboardShortcut("q")
+                .buttonStyle(.plain).font(P.small).foregroundStyle(Theme.secondary).keyboardShortcut("q")
         }
         .padding(.horizontal, 4)
     }
@@ -157,16 +157,16 @@ struct MenuBarPanel: View {
     private func row(_ title: String, _ symbol: String, _ summary: (String, Color), busy: Bool,
                      action: String, perform: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 12)).foregroundStyle(summary.1 == Theme.tertiary ? Theme.secondary : summary.1)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(Theme.body).foregroundStyle(Theme.text)
-                Text(summary.0).font(Theme.small).foregroundStyle(summary.1).lineLimit(1)
+            Image(systemName: symbol).font(.system(size: 16)).foregroundStyle(summary.1 == Theme.tertiary ? Theme.secondary : summary.1)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.text)
+                Text(summary.0).font(P.small).foregroundStyle(summary.1).lineLimit(1)
             }
             Spacer(minLength: 8)
             if busy { ProgressView().controlSize(.small) } else { Button(action: perform) { ActionLabel(action) }.buttonStyle(.ghost) }
         }
-        .frame(height: 40)
+        .frame(height: 50)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { openMain() }
     }
@@ -185,6 +185,11 @@ struct MenuBarPanel: View {
         f.unitsStyle = .abbreviated
         return f.string(from: t) ?? ""
     }
+}
+
+/// Panel type sizes: larger than the main window's, since the popover is read at a glance.
+private enum P {
+    static let small = Font.system(size: 13)
 }
 
 /// iStatistica-like colours: magenta CPU, orange RAM, teal SSD; the memory split matches Activity Monitor's.
@@ -216,17 +221,17 @@ private struct Card<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             if let title {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(title).font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.text)
+                    Text(title).font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.text)
                     Spacer()
-                    if let trailing { Text(trailing).font(Theme.small).foregroundStyle(Theme.secondary) }
+                    if let trailing { Text(trailing).font(P.small).foregroundStyle(Theme.secondary) }
                 }
             }
             content
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
     }
 }
 
@@ -237,13 +242,13 @@ private struct Ring: View {
 
     var body: some View {
         ZStack {
-            Circle().stroke(Theme.border, lineWidth: 8)
+            Circle().stroke(Theme.border, lineWidth: 10)
             Circle().trim(from: 0, to: max(0.005, min(value, 1)))
-                .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                .stroke(color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.easeOut(duration: 0.4), value: value)
         }
-        .frame(width: diameter - 8, height: diameter - 8)
+        .frame(width: diameter - 10, height: diameter - 10)
     }
 }
 
@@ -253,10 +258,10 @@ private struct BigStat: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(label).font(Theme.small).foregroundStyle(Theme.secondary)
-            Text(value).font(.system(size: 20, weight: .semibold, design: .rounded)).foregroundStyle(color).monospacedDigit()
+            Text(label).font(P.small).foregroundStyle(Theme.secondary)
+            Text(value).font(.system(size: 28, weight: .semibold, design: .rounded)).foregroundStyle(color).monospacedDigit()
         }
-        .frame(minWidth: 56, alignment: .leading)
+        .frame(minWidth: 70, alignment: .leading)
     }
 }
 
@@ -271,21 +276,21 @@ private struct Legend: View {
     var body: some View {
         if stacked {
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) { dot; Text(label).font(Theme.small).foregroundStyle(Theme.secondary) }
-                Text(value).font(Theme.small.weight(.medium)).foregroundStyle(Theme.text).monospacedDigit().padding(.leading, 12)
+                HStack(spacing: 5) { dot; Text(label).font(P.small).foregroundStyle(Theme.secondary) }
+                Text(value).font(P.small.weight(.medium)).foregroundStyle(Theme.text).monospacedDigit().padding(.leading, 14)
             }
             .lineLimit(1)
         } else {
             HStack(spacing: 5) {
                 dot
-                Text(label).font(Theme.small).foregroundStyle(Theme.secondary)
-                Text(value).font(Theme.small.weight(.medium)).foregroundStyle(Theme.text).monospacedDigit()
+                Text(label).font(P.small).foregroundStyle(Theme.secondary)
+                Text(value).font(P.small.weight(.medium)).foregroundStyle(Theme.text).monospacedDigit()
             }
             .lineLimit(1)
         }
     }
 
-    private var dot: some View { Circle().fill(color).frame(width: 7, height: 7) }
+    private var dot: some View { Circle().fill(color).frame(width: 9, height: 9) }
 }
 
 /// Horizontal bar split into coloured parts; the rest of `total` stays as the track.
@@ -304,7 +309,7 @@ private struct StackedBar: View {
             .background(Theme.border)
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
-        .frame(height: 10)
+        .frame(height: 14)
     }
 }
 

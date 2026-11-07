@@ -47,7 +47,7 @@ enum Snapshot {
             print("wrote \(name).png")
         }
         for pane in Pane.allCases { render(pane.rawValue.replacingOccurrences(of: " ", with: "-"), ContentView(initial: pane)) }
-        render("menubar", MenuBarPanel(), width: 340, height: nil)  // natural height
+        render("menubar", MenuBarPanel(), width: 400, height: nil)  // natural height
         exit(0)
     }
 }

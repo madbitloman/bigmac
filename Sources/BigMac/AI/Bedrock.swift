@@ -98,7 +98,7 @@ enum Redact {
     static let patterns: [(String, String)] = [
         (#"AKIA[0-9A-Z]{16}"#, "<aws-key>"),
         (#"(?i)bearer\s+[A-Za-z0-9._~+/=-]+"#, "Bearer <redacted>"),
-        (#"(?i)((?:token|secret|passw(?:or)?d|pwd|api[_-]?key|auth|credential)s?["']?\s*[=:]\s*)["']?[^\s"'&]+"#, "$1<redacted>"),
+        (#"(?i)((?:token|secret|passw(?:or)?d|pwd|api[_-]?key|auth|credential)s?["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s"'&]+)"#, "$1<redacted>"),
         (#"(?i)(--?(?:token|secret|password|pass|key|auth)[=\s]+)\S+"#, "$1<redacted>"),
         (#"(?i)(authorization["']?\s*[=:]\s*["']?(?:basic|digest|token)?\s*)[^\s"']+"#, "$1<redacted>"),
         (#"(?i)\b(basic\s+)[A-Za-z0-9+/=]{8,}"#, "$1<redacted>"),

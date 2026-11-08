@@ -133,6 +133,8 @@ enum SelfTest {
         check(!["abc123", "AKIAABCDEFGHIJKLMNOP", "eyJhbGciOi", "hunter2", "bob:pw", FS.home.path].contains(where: scrubbed.contains), "redaction: \(scrubbed)")
         let positional = Redact.scrub("curl -u admin:hunter2 -H 'Authorization: Basic YWRtaW46aHVudGVyMg==' x; mysql -phunter3 db; sshpass -p hunter4 ssh h; bot123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
         check(!["hunter2", "YWRtaW46aHVudGVyMg", "hunter3", "hunter4", "AAAAAAAAAAAAAAAAAAAA"].contains(where: positional.contains), "redaction of positional credentials: \(positional)")
+        let quoted = Redact.scrub(#"export PASSWORD="two word secret"; db_password: 'more words here'"#)
+        check(!["two", "word secret", "more words"].contains(where: quoted.contains), "redaction takes whole quoted values: \(quoted)")
         let late = Redact.scrub(String(repeating: "x ", count: 140) + "token=" + String(repeating: "Z", count: 60))
         check(!late.contains("ZZZZ"), "secret near the 300-char edge is scrubbed before truncation")
         check(AppScanner.leftoverCandidates(bundleID: "../../Documents", name: "..").isEmpty, "bundle id / name traversal never escapes ~/Library")
@@ -165,6 +167,8 @@ enum SelfTest {
         check(fm.fileExists(atPath: rm.appending(path: "elsewhere/victim").path) && (try? fm.contentsOfDirectory(atPath: stage2))?.isEmpty == true,
               "root move refuses a parent swapped for a symlink after confirmation")
 
+        check(Removal.rootMoves([URL(filePath: "/private/tmp/x"), URL(filePath: "/tmp/x"), URL(filePath: "/private/etc/x")], stage: "/nonexistent").skipped.isEmpty,
+              "root move still handles items directly in /tmp and /etc (Apple's own links)")
         print("Symlinked folders")
         check(FS.isRealDirectory(rm.appending(path: "elsewhere")) && !FS.isRealDirectory(rm.appending(path: "b")), "a symlinked folder is not a real scan root")
         let viaLink = FS.trash([(rm.appending(path: "b/victim"), 0)])

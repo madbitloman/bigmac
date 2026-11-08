@@ -44,9 +44,7 @@ struct CleanView: View {
         .confirmationDialog("Move \(model.selected.count) items (\(model.selectedBytes.bytes)) to the Trash?", isPresented: $confirm) {
             Button("Move to Trash", role: .destructive) { Task { await model.trashSelected() } }
         } message: {
-            Text(model.selected.contains(where: FS.isInTrash)
-                 ? "Items already in the Trash are deleted permanently. Everything else goes to the Trash and can be restored."
-                 : "Items go to the Trash, so you can restore them until you empty it.")
+            Text(confirmMessage)
         }
     }
 
@@ -126,5 +124,16 @@ struct CleanView: View {
     private func toggleAll(_ r: CategoryResult) {
         let urls = Set(r.items.filter { $0.blocked == nil }.map(\.url))
         if allSelected(r) { model.selected.subtract(urls) } else { model.selected.formUnion(urls) }
+    }
+
+    /// Says plainly which parts can't be restored: items already in the Trash, and Docker data (removed by docker itself).
+    private var confirmMessage: String {
+        let chosen = model.allItems.filter { model.selected.contains($0.url) }
+        var permanent: [String] = []
+        if chosen.contains(where: { $0.docker == nil && FS.isInTrash($0.url) }) { permanent.append("items already in the Trash") }
+        if chosen.contains(where: { $0.docker != nil }) { permanent.append("Docker images and volumes") }
+        guard !permanent.isEmpty else { return "Items go to the Trash, so you can restore them until you empty it." }
+        let rest = chosen.contains { $0.docker == nil && !FS.isInTrash($0.url) } ? " Everything else goes to the Trash and can be restored." : ""
+        return "These are deleted permanently and can't be restored: \(permanent.joined(separator: " and "))." + rest
     }
 }

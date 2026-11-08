@@ -180,11 +180,12 @@ enum Removal {
             if Shell.run("/usr/bin/osascript", ["-e", script], timeout: 300) == nil { out.cancelled = true }
         }
         // Root handed the staging folder to the user; it goes to the Trash like everything else.
-        if let left = try? FileManager.default.contentsOfDirectory(atPath: stage) {
-            if left.isEmpty {
+        if FileManager.default.fileExists(atPath: stage) {
+            let left = try? FileManager.default.contentsOfDirectory(atPath: stage)
+            if left?.isEmpty == true {
                 try? FileManager.default.removeItem(atPath: stage)
-            } else if (try? FileManager.default.trashItem(at: URL(filePath: stage), resultingItemURL: nil)) == nil {
-                out.log.append("Moved items are in \(stage); drag that folder to the Trash.")
+            } else if left == nil || (try? FileManager.default.trashItem(at: URL(filePath: stage), resultingItemURL: nil)) == nil {
+                out.log.append("Moved items are in \(stage); move that folder to the Trash yourself (it may need admin).")
             }
         }
         for t in asRoot {
@@ -209,8 +210,10 @@ enum Removal {
         for (n, url) in targets.enumerated() {
             let lexical = url.standardizedFileURL
             let parent = lexical.deletingLastPathComponent().resolvingSymlinksInPath().path
+            // stat, not lstat: the parent may be one of Apple's top-level links (/tmp, /etc). `cd -P` below follows it
+            // the same way, and isSafe already refused any other symlinked parent.
             var st = stat()
-            guard lstat(parent, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { skipped.append(url); continue }
+            guard stat(parent, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { skipped.append(url); continue }
             let name = lexical.lastPathComponent
             commands.append("( cd -P -- \(q(parent)) && [ \"$(/usr/bin/stat -f %d:%i .)\" = \(q("\(st.st_dev):\(st.st_ino)")) ] && "
                             + "/bin/mv -n -- \(q("./" + name)) \"$D/\"\(q("\(n + 1) \(name)")) )")

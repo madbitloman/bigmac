@@ -40,6 +40,8 @@ struct AuditItem: Identifiable, Sendable, Hashable {
     var pid: Int32?
     /// Apple-signed or otherwise expected; never sent to Haiku.
     var routine = false
+    /// cdhash or file hash of the binaries behind the item, so a false-positive mark doesn't carry over to a replaced file.
+    var codeIdentity: String? = nil
 }
 
 struct AuditReport: Sendable {
@@ -240,8 +242,17 @@ enum HostAudit {
                 if item.runAtLoad || item.keepAlive { evidence.append("starts \(item.runAtLoad ? "at login/boot" : "")\(item.keepAlive ? " and is kept alive" : "")") }
                 if let created { evidence.append("created \(FS.ago(created))") }
                 let level = signals.contains("target binary is missing") && signals.count == 1 ? .low : level(for: signals)
+                var identity: String?
+                if level > .none {
+                    var parts: [String] = []
+                    for p in [item.program, payload].compactMap({ $0 }) where FileManager.default.isReadableFile(atPath: p) {
+                        parts.append(await signatures.identity(for: p) ?? "?")
+                    }
+                    identity = parts.isEmpty ? nil : parts.joined(separator: "+")
+                }
                 out.append(AuditItem(id: "persistence:\(url.path)", kind: .persistence, title: item.label, evidence: evidence,
-                                       signals: signals, severity: level, path: url, routine: signer == .apple && signals.isEmpty))
+                                       signals: signals, severity: level, path: url, routine: signer == .apple && signals.isEmpty,
+                                       codeIdentity: identity))
             }
         }
         if let cron = Shell.run("crontab", ["-l"]) {
@@ -331,7 +342,8 @@ enum HostAudit {
             let first = procs[0]
             out.append(AuditItem(id: "process:\(path)", kind: .process, title: URL(filePath: path).lastPathComponent,
                                    evidence: ["executable: \(path)", "signer: \(signerLabel)", "pids: \(procs.map { String($0.pid) }.joined(separator: ", ")) (user \(first.user), parent \(first.ppid))"],
-                                   signals: signals, severity: level(for: signals), pid: first.pid))
+                                   signals: signals, severity: level(for: signals), pid: first.pid,
+                                   codeIdentity: await signatures.identity(for: path)))
         }
         return out
     }
@@ -349,13 +361,16 @@ enum HostAudit {
             let key = path ?? c.command
             grouped[key, default: (c, path, signer, signals, [])].4.append(c.remote)
         }
-        return grouped.map { key, g in
+        var out: [AuditItem] = []
+        for (key, g) in grouped {
             let (c, path, signer, signals, remotes) = g
-            return AuditItem(id: "network:\(key)", kind: .network, title: c.command,
-                               evidence: ["executable: \(path ?? "unknown")", "signer: \(signer.label)",
-                                          "remote: \(Array(Set(remotes)).sorted().prefix(8).joined(separator: ", "))"],
-                               signals: signals.map(\.rawValue), severity: RiskLevel(signals: signals), pid: c.pid)
+            out.append(AuditItem(id: "network:\(key)", kind: .network, title: c.command,
+                                 evidence: ["executable: \(path ?? "unknown")", "signer: \(signer.label)",
+                                            "remote: \(Array(Set(remotes)).sorted().prefix(8).joined(separator: ", "))"],
+                                 signals: signals.map(\.rawValue), severity: RiskLevel(signals: signals), pid: c.pid,
+                                 codeIdentity: path == nil ? nil : await signatures.identity(for: path!)))
         }
+        return out
     }
 
     // MARK: Interception

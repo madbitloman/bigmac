@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 import Security
@@ -119,6 +120,46 @@ actor SignatureCache {
         let result = Self.check(path)
         cache[path] = result
         return result
+    }
+
+    private var identities: [String: (stamp: String, id: String)] = [:]
+
+    /// Exactly which binary is at `path`: its code directory hash when signed (ad-hoc included), else a SHA-256 of
+    /// the file. Cached per size and modification time, so a replaced file is noticed within a session.
+    func identity(for path: String) -> String? {
+        let stamp = Self.stamp(path)
+        if let stamp, let hit = identities[path], hit.stamp == stamp { return hit.id }
+        guard let stamp, let id = Self.identity(path) else { return nil }
+        identities[path] = (stamp, id)
+        return id
+    }
+
+    private static func stamp(_ path: String) -> String? {
+        guard let a = try? FileManager.default.attributesOfItem(atPath: path) else { return nil }
+        return "\(a[.size] ?? 0)|\((a[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)"
+    }
+
+    nonisolated static func identity(_ path: String) -> String? { cdhash(path) ?? fileHash(path) }
+
+    nonisolated static func cdhash(_ path: String) -> String? {
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(URL(filePath: path) as CFURL, [], &staticCode) == errSecSuccess, let code = staticCode else { return nil }
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(code, [], &info) == errSecSuccess,
+              let unique = (info as NSDictionary?)?[kSecCodeInfoUnique] as? Data else { return nil }
+        return "cdhash:" + unique.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// SHA-256 of a regular file, read in chunks; files over `limit` are hashed up to it, with the size appended.
+    nonisolated static func fileHash(_ path: String, limit: Int = 512 << 20) -> String? {
+        guard let h = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? h.close() }
+        var hasher = SHA256(), total = 0
+        while total < limit, let chunk = try? h.read(upToCount: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+            total += chunk.count
+        }
+        return "sha256:" + hasher.finalize().map { String(format: "%02x", $0) }.joined() + (total >= limit ? "+\(stamp(path) ?? "")" : "")
     }
 
     static func check(_ path: String) -> Signer {

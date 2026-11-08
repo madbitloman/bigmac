@@ -328,14 +328,14 @@ final class NetworkModel {
         didSet { UserDefaults.standard.set(trusted, forKey: "networkTrustMarks") }
     }
 
-    private func isTrusted(_ path: String, _ signer: Signer) -> Bool {
-        Marks.verify(trusted[path], ConnectionRow.trustContent(path: path, signer: signer))
+    private func isTrusted(_ path: String, _ signer: Signer, _ identity: String?) -> Bool {
+        Marks.verify(trusted[path], ConnectionRow.trustContent(path: path, signer: signer, identity: identity))
     }
 
     func setTrusted(_ row: ConnectionRow, _ on: Bool) {
         guard let path = row.exePath else { return }
-        trusted[path] = on ? Marks.seal(ConnectionRow.trustContent(path: path, signer: row.signer)) : nil
-        for i in rows.indices where rows[i].exePath == path { rows[i].trusted = isTrusted(path, rows[i].signer) }
+        trusted[path] = on ? Marks.seal(ConnectionRow.trustContent(path: path, signer: row.signer, identity: SignatureCache.identity(path))) : nil
+        for i in rows.indices where rows[i].exePath == path { rows[i].trusted = on }
     }
     private var loop: Task<Void, Never>?
     private let launched = Date()
@@ -382,11 +382,14 @@ final class NetworkModel {
                 index[key] = fresh.count
                 let path = Lsof.executablePath(pid: c.pid)
                 let signer = path != nil ? await signatures.signer(for: path!) : .unknown
+                // Only binaries with a trust mark are hashed, to check the mark is for this exact file.
+                var identity: String?
+                if let path, trusted[path] != nil { identity = await signatures.identity(for: path) }
                 let seen = firstSeen[c.id] ?? Date()
                 firstSeen[c.id] = seen
                 fresh.append(ConnectionRow(connection: c, exePath: path, signer: signer,
                                            signals: RiskSignal.evaluate(c, exePath: path, signer: signer), firstSeen: seen,
-                                           trusted: path.map { isTrusted($0, signer) } ?? false))
+                                           trusted: path.map { isTrusted($0, signer, identity) } ?? false))
             }
             rows = fresh.sorted { ($0.level, jev[$0.jevKey]?.value ?? 0) > ($1.level, jev[$1.jevKey]?.value ?? 0) }
             let flagged = rows.filter { $0.level >= .medium }.count

@@ -4,9 +4,8 @@ import Security
 
 /// The user's "false positive" and "trust this binary" marks. They are stored in defaults and signed with a
 /// secret kept in this Mac's Keychain, so a mark that another process writes into defaults doesn't count.
-/// Each mark is also bound to what the item looked like when it was marked: a changed command line, signer or
-/// risk signal voids it. It is not bound to the file's bytes, so replacing an unsigned binary with another unsigned
-/// binary at the same path keeps the mark.
+/// Each mark is also bound to what the item looked like when it was marked: a changed command line, signer, risk
+/// signal, or binary (its cdhash, or a file hash when unsigned) voids it.
 enum Marks {
     private static let service = "com.bigmac.marks"
     private static let account = "hmac-key"
@@ -48,12 +47,14 @@ extension AuditItem {
         // Connections come and go between scans; a network item's mark is about the binary.
         let evidence = kind == .network ? evidence.filter { $0.hasPrefix("executable:") || $0.hasPrefix("signer:") }
             : evidence.filter { e in !volatileEvidence.contains(where: e.hasPrefix) }
-        return (["audit", id, title] + evidence + ["--"] + signals.filter { !volatileSignals.contains($0) }.sorted())
+        return (["audit", id, title, "code: \(codeIdentity ?? "-")"] + evidence + ["--"] + signals.filter { !volatileSignals.contains($0) }.sorted())
             .joined(separator: "\n")
     }
 }
 
 extension ConnectionRow {
-    /// A trusted binary stays trusted only while it has the same signer.
-    static func trustContent(path: String, signer: Signer) -> String { "network\n\(path)\n\(signer.label)" }
+    /// A trusted binary stays trusted only while it is the same binary: same signer and same cdhash or file hash.
+    static func trustContent(path: String, signer: Signer, identity: String?) -> String {
+        "network\n\(path)\n\(signer.label)\n\(identity ?? "-")"
+    }
 }

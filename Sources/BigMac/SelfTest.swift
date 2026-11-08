@@ -248,6 +248,12 @@ enum SelfTest {
         var swapped = marked; swapped.evidence[0] = "runs: /Users/me/b"
         check(Marks.verify(tag, aged.markContent) && !Marks.verify(tag, swapped.markContent),
               "a false-positive mark survives ageing but not a changed command")
+        var replaced = marked; replaced.codeIdentity = "sha256:other"
+        check(!Marks.verify(Marks.seal(marked.markContent), replaced.markContent), "a mark doesn't carry over to a replaced binary")
+        let binA = dir.appending(path: "bin-a"), binB = dir.appending(path: "bin-b")
+        try! Data("#!/bin/sh\necho a\n".utf8).write(to: binA); try! Data("#!/bin/sh\necho b\n".utf8).write(to: binB)
+        check(SignatureCache.identity(binA.path) != SignatureCache.identity(binB.path) && SignatureCache.identity(binA.path)?.hasPrefix("sha256:") == true
+              && SignatureCache.identity("/bin/ls")?.hasPrefix("cdhash:") == true, "binary identity: cdhash when signed, file hash otherwise")
         check(!Marks.verify("x", marked.markContent) && !Marks.verify(marked.title, marked.markContent), "a mark written without the Keychain secret doesn't count")
 
         let vendor = dir.appending(path: "co.example.widget")
@@ -276,6 +282,11 @@ enum SelfTest {
         print("    \(report.observations.count) observations, \(flagged.count) flagged, \(AuditTriage.candidates(report.observations).count) for Haiku, \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
         for o in flagged.sorted(by: { $0.severity > $1.severity }).prefix(12) {
             print("      [\(o.severity.label)] \(o.kind.rawValue): \(o.title) — \(o.signals.prefix(2).joined(separator: "; "))")
+        }
+        // Launch items flagged through a launcher or its payload, so changes to those rules can be eyeballed.
+        for o in flagged where o.kind == .persistence && o.evidence.contains(where: { $0.hasPrefix("payload:") || $0.hasPrefix("runs: /usr/bin/env") })
+            || o.signals.contains(where: { $0.hasPrefix("starts another program via") }) {
+            print("      launcher: [\(o.severity.label)] \(o.title) — \(o.signals.joined(separator: "; ")) | \(o.evidence.filter { $0.hasPrefix("runs:") || $0.hasPrefix("payload") }.joined(separator: " | "))")
         }
         for n in report.notes { print("      note: \(n)") }
 

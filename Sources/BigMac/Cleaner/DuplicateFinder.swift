@@ -16,7 +16,8 @@ enum DuplicateFinder {
         var bySize: [Int64: [URL]] = [:]
         var scanned = 0
 
-        for root in roots {
+        // Resolve each root once, so every path found is the file's real location (trash refuses symlinked folders).
+        for root in roots.map({ $0.resolvingSymlinksInPath() }) {
             let enumerator = FileManager.default.enumerator(
                 at: root, includingPropertiesForKeys: Array(keys),
                 options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in true })

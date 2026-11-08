@@ -1,9 +1,12 @@
 import AppKit
 
+#if DEBUG
+// Developer self-test: debug builds only, so the shipped app has no command-line path that reads saved keys.
 if CommandLine.arguments.contains("--selftest") {
     Task.detached { await SelfTest.run(arguments: CommandLine.arguments) }
     dispatchMain()
 }
+#endif
 
 if let i = CommandLine.arguments.firstIndex(of: "--icon"), CommandLine.arguments.indices.contains(i + 1) {
     let app = NSApplication.shared

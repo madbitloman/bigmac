@@ -48,7 +48,7 @@ To notarize, set `NOTARY_PROFILE` (a profile saved with `xcrun notarytool store-
 
 Both are off until you click them.
 
-**Ask AI** (Security) sends flagged audit items to a model you choose. They go under opaque ids, with secrets and your home path removed. A known-technique match can't be lowered by the model. Pick a provider in **Settings → Security Audit**:
+**Ask AI** (Security) sends flagged audit items to a model you choose. Turn on the **AI triage** chip to run it after every audit; it stays off until you do. They go under opaque ids, with secrets and your home path removed. A known-technique match can't be lowered by the model. Pick a provider in **Settings → Security Audit**:
 
 | Provider | Setup |
 |---|---|
@@ -56,7 +56,7 @@ Both are off until you click them.
 | Anthropic API | Paste a key; Claude Haiku 5.5 costs well under a cent per audit |
 | OpenAI-compatible | Base URL, model id and key: OpenAI, OpenRouter, Groq, or a local Ollama or LM Studio (no key) |
 
-Keys are stored in your Keychain on this Mac only, or read from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`.
+Keys are stored in your Keychain on this Mac only, or read from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. An OpenAI-compatible key is saved for the base URL you entered and is only ever sent there, so changing the URL needs its own key; `OPENAI_API_KEY` is only sent to api.openai.com. Requests that carry a key never follow redirects.
 
 **Ask Jev** (Clean, Apps, Network): [TypeSafe Jev](https://docs.typesafe.ai) judges which caches are safe to delete and how suspicious a connection is. Paste a key in Settings, set `TYPESAFE_API_KEY`, or fetch it once from AWS SSM (`defaults write com.bigmac.app typesafeSSMName <parameter>`).
 

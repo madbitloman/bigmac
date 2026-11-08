@@ -1,5 +1,7 @@
 import Foundation
 
+#if DEBUG  // Never compiled into the release app (see main.swift).
+
 /// Headless checks: `BigMac --selftest <fixture-dir> [--jev] [--bedrock]`.
 /// Only writes inside the fixture dir; scans of the real home folder are read-only.
 enum SelfTest {
@@ -11,8 +13,8 @@ enum SelfTest {
         }
 
         let dirArg = arguments.firstIndex(of: "--selftest").flatMap { i in arguments.indices.contains(i + 1) ? arguments[i + 1] : nil }
-        let dir = URL(filePath: dirArg ?? NSTemporaryDirectory()).appending(path: "bigmac-fixture")
-        try? FileManager.default.removeItem(at: dir)
+        // A fresh folder per run, so only what this run created is ever deleted.
+        let dir = URL(filePath: dirArg ?? NSTemporaryDirectory()).appending(path: "bigmac-fixture-\(UUID().uuidString.prefix(8))")
         try! FileManager.default.createDirectory(at: dir.appending(path: "sub"), withIntermediateDirectories: true)
 
         print("Duplicates (fixture: \(dir.path))")
@@ -140,6 +142,43 @@ enum SelfTest {
         check(!Removal.isSafe(lnkRoot.appending(path: "LaunchDaemons")), "removal refuses a target behind a symlinked parent")
         try? FileManager.default.removeItem(at: lnkRoot)
         check(!Removal.isSafe(URL(filePath: "/Library/LaunchDaemons")) && !Removal.isSafe(URL(filePath: "/Library/Keychains")), "removal refuses direct /Library subfolders")
+
+        // Root's moves, run here as the user on fixture folders: a normal move lands in the stage,
+        // and a parent swapped for a symlink after confirmation moves nothing.
+        let rm = dir.appending(path: "rootmove")
+        let fm = FileManager.default
+        try! fm.createDirectory(at: rm.appending(path: "a"), withIntermediateDirectories: true)
+        try! fm.createDirectory(at: rm.appending(path: "b"), withIntermediateDirectories: true)
+        try! fm.createDirectory(at: rm.appending(path: "elsewhere"), withIntermediateDirectories: true)
+        try! Data("x".utf8).write(to: rm.appending(path: "a/victim"))
+        try! Data("x".utf8).write(to: rm.appending(path: "b/victim"))
+        try! Data("x".utf8).write(to: rm.appending(path: "elsewhere/victim"))
+        func runRoot(_ commands: [String]) { _ = Shell.run("/bin/sh", ["-c", commands.joined(separator: "; ")], anyStatus: true) }
+        let stage1 = rm.appending(path: "stage1").path
+        runRoot(Removal.rootMoves([rm.appending(path: "a/victim")], stage: stage1).commands)
+        check(fm.fileExists(atPath: stage1 + "/1 victim") && !fm.fileExists(atPath: rm.appending(path: "a/victim").path), "root move lands in its own staging folder")
+        let stage2 = rm.appending(path: "stage2").path
+        let planned = Removal.rootMoves([rm.appending(path: "b/victim")], stage: stage2).commands
+        try! fm.moveItem(at: rm.appending(path: "b"), to: rm.appending(path: "b.old"))
+        try! fm.createSymbolicLink(at: rm.appending(path: "b"), withDestinationURL: rm.appending(path: "elsewhere"))
+        runRoot(planned)
+        check(fm.fileExists(atPath: rm.appending(path: "elsewhere/victim").path) && (try? fm.contentsOfDirectory(atPath: stage2))?.isEmpty == true,
+              "root move refuses a parent swapped for a symlink after confirmation")
+
+        print("Symlinked folders")
+        check(FS.isRealDirectory(rm.appending(path: "elsewhere")) && !FS.isRealDirectory(rm.appending(path: "b")), "a symlinked folder is not a real scan root")
+        let viaLink = FS.trash([(rm.appending(path: "b/victim"), 0)])
+        check(viaLink.trashed.isEmpty && fm.fileExists(atPath: rm.appending(path: "elsewhere/victim").path), "trash refuses an item behind a symlinked folder")
+
+        print("API keys")
+        let openai = URL(string: "https://api.openai.com/v1")!
+        check(InferenceKeys.origin(of: URL(string: "https://API.OpenAI.com:443/v1/")!) == InferenceKeys.origin(of: openai), "origin ignores case and default port")
+        check(InferenceKeys.account(.openai, server: URL(string: "https://evil.example/v1")!) != InferenceKeys.account(.openai, server: openai)
+              && InferenceKeys.account(.openai, server: URL(string: "http://localhost:11434/v1")!) != InferenceKeys.account(.openai, server: URL(string: "http://localhost:1234/v1")!),
+              "an OpenAI-compatible key is saved per server")
+        check(InferenceKeys.account(.openai, server: URL(string: "file:///tmp/x")!) == nil && InferenceKeys.account(.openai) == nil, "no key slot without an http(s) server")
+        check(InferenceKeys.envKeyApplies(.openai, server: openai) && !InferenceKeys.envKeyApplies(.openai, server: URL(string: "https://evil.example/v1")!),
+              "OPENAI_API_KEY only goes to api.openai.com")
         check(Removal.isSafe(URL(filePath: "/private/etc/sudoers.d/battery")) || !FileManager.default.fileExists(atPath: "/private/etc/sudoers.d/battery"), "sudoers rule still removable")
         let leaky = [AuditItem(id: "persistence:cron:* * * * * curl --token=SECRET123 \(FS.home.path)/x", kind: .persistence, title: "crontab entry",
                                evidence: ["* * * * * curl --token=SECRET123 \(FS.home.path)/x"]),
@@ -210,7 +249,7 @@ enum SelfTest {
             liveModels.append(AnthropicClient(model: InferenceProvider.anthropic.models[0].0, key: key))
         }
         if let i = arguments.firstIndex(of: "--openai"), arguments.indices.contains(i + 2), let base = URL(string: arguments[i + 1]) {
-            liveModels.append(OpenAICompatibleClient(model: arguments[i + 2], baseURL: base, key: InferenceKeys.resolve(.openai)))
+            liveModels.append(OpenAICompatibleClient(model: arguments[i + 2], baseURL: base, key: InferenceKeys.resolve(.openai, server: base)))
         }
         for client in liveModels {
             print("Live triage (\(client.model))")
@@ -271,3 +310,4 @@ enum SelfTest {
         exit(failures == 0 ? 0 : 1)
     }
 }
+#endif

@@ -92,7 +92,7 @@ enum ScreenshotScanner {
 
         let keys: [URLResourceKey] = [.creationDateKey, .isRegularFileKey]
         for (folder, takeAllMedia) in folders {
-            guard let files = FS.children(of: folder, keys: keys) else { result.denied = true; continue }
+            guard let files = FS.children(of: folder.resolvingSymlinksInPath(), keys: keys) else { result.denied = true; continue }
             for file in files where mediaExtensions.contains(file.pathExtension.lowercased()) {
                 let name = file.lastPathComponent
                 guard takeAllMedia || namePrefixes.contains(where: name.hasPrefix) else { continue }

@@ -57,46 +57,95 @@ func listPrice(model: String) -> (Double, Double)? {
 }
 
 /// API keys for inference providers, one Keychain item each. Never written to disk or defaults.
+///
+/// An OpenAI-compatible key belongs to the server it was saved for: the Keychain account carries that server's
+/// origin, so pointing the base URL somewhere else (in Settings, or behind the app's back with `defaults write`)
+/// finds no key instead of sending yours there. `OPENAI_API_KEY` from the environment only goes to api.openai.com.
 enum InferenceKeys {
     private static let service = "com.bigmac.inference"
+    static let openAIOrigin = "https://api.openai.com"
 
-    static func resolve(_ provider: InferenceProvider) -> String? {
-        if let name = provider.envKey, let env = ProcessInfo.processInfo.environment[name], !env.isEmpty { return env }
-        return read(provider)
+    /// scheme://host[:port], lowercased, default port dropped. Nil for anything that isn't http(s) with a host.
+    static func origin(of url: URL) -> String? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              let host = url.host()?.lowercased(), !host.isEmpty else { return nil }
+        let port = url.port.flatMap { (scheme == "https" && $0 == 443) || (scheme == "http" && $0 == 80) ? nil : $0 }
+        return "\(scheme)://\(host)" + (port.map { ":\($0)" } ?? "")
     }
 
-    static func read(_ provider: InferenceProvider) -> String? {
+    /// Keychain account for a provider's key; the OpenAI-compatible one is per server.
+    static func account(_ provider: InferenceProvider, server: URL? = nil) -> String? {
+        switch provider {
+        case .bedrock: return nil
+        case .anthropic: return provider.rawValue
+        case .openai: return server.flatMap(origin).map { "\(provider.rawValue) \($0)" }
+        }
+    }
+
+    /// Whether the provider's environment variable applies to this request.
+    static func envKeyApplies(_ provider: InferenceProvider, server: URL? = nil) -> Bool {
+        provider != .openai || server.flatMap(origin) == openAIOrigin
+    }
+
+    static func resolve(_ provider: InferenceProvider, server: URL? = nil) -> String? {
+        if envKeyApplies(provider, server: server), let name = provider.envKey,
+           let env = ProcessInfo.processInfo.environment[name], !env.isEmpty { return env }
+        return read(provider, server: server)
+    }
+
+    static func read(_ provider: InferenceProvider, server: URL? = nil) -> String? {
+        guard let account = account(provider, server: server) else { return nil }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-            kSecAttrAccount as String: provider.rawValue, kSecReturnData as String: true,
+            kSecAttrAccount as String: account, kSecReturnData as String: true,
         ]
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
+    /// Replaces the saved key; the old one is kept if the new one can't be stored.
     @discardableResult
-    static func save(_ key: String, for provider: InferenceProvider) -> Bool {
-        delete(provider)
-        let attrs: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-            kSecAttrAccount as String: provider.rawValue, kSecValueData as String: Data(key.utf8),
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+    static func save(_ key: String, for provider: InferenceProvider, server: URL? = nil) -> Bool {
+        guard let account = account(provider, server: server) else { return false }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account,
         ]
-        return SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess
+        let value: [String: Any] = [kSecValueData as String: Data(key.utf8)]
+        switch SecItemUpdate(query as CFDictionary, value as CFDictionary) {
+        case errSecSuccess:
+            return true
+        case errSecItemNotFound:
+            let attrs = query.merging(value) { $1 }.merging([kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]) { $1 }
+            return SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess
+        default:
+            return false
+        }
     }
 
-    static func delete(_ provider: InferenceProvider) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-            kSecAttrAccount as String: provider.rawValue,
-        ]
-        SecItemDelete(query as CFDictionary)
+    static func delete(_ provider: InferenceProvider, server: URL? = nil) {
+        // The pre-0.1.1 OpenAI key wasn't tied to a server; drop it too, it is never used.
+        let accounts = [account(provider, server: server), provider == .openai ? provider.rawValue : nil].compactMap { $0 }
+        for account in accounts {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account,
+            ]
+            SecItemDelete(query as CFDictionary)
+        }
     }
 }
 
 /// Blocking JSON POST; triage already runs off the main actor.
 enum HTTPJSON {
+    /// Requests carry an API key, so a redirect is an error rather than a reason to send it to another host.
+    private final class NoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+            completionHandler(nil)
+        }
+    }
+    private static let session = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
+
     static func post(_ url: URL, headers: [String: String], body: [String: Any], timeout: TimeInterval = 90) throws -> [String: Any] {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = "POST"
@@ -106,7 +155,7 @@ enum HTTPJSON {
 
         nonisolated(unsafe) var result: Result<(Data, HTTPURLResponse), Error> = .failure(InferenceError(message: "no response"))
         let done = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        session.dataTask(with: request) { data, response, error in
             if let error { result = .failure(error) }
             else if let data, let http = response as? HTTPURLResponse { result = .success((data, http)) }
             done.signal()

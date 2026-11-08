@@ -21,6 +21,22 @@ enum FS {
         return false
     }
 
+    /// True when no folder above `url` is a symlink, so the path is what it looks like.
+    /// macOS's own top-level links (/tmp, /var, /etc → /private/…) count as real.
+    static func parentIsReal(_ url: URL) -> Bool {
+        let lexical = url.standardizedFileURL.deletingLastPathComponent().path
+        let real = url.standardizedFileURL.deletingLastPathComponent().resolvingSymlinksInPath().path
+        return real == lexical || real == "/private" + lexical || "/private" + real == lexical
+    }
+
+    /// A folder that is really there: not itself a symlink, and not reached through one.
+    /// Scanners only list what's inside such folders, so a planted link can't make them list somewhere else.
+    static func isRealDirectory(_ url: URL) -> Bool {
+        guard let v = try? url.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey]),
+              v.isSymbolicLink != true, v.isDirectory == true else { return false }
+        return parentIsReal(url)
+    }
+
     final class ErrorFlag: @unchecked Sendable { var hit = false }
 
     /// Allocated size on disk, plus whether any part of the tree was unreadable.
@@ -66,6 +82,11 @@ enum FS {
         for item in items {
             if isProtected(item.url) {
                 result.failures.append((item.url, "protected path"))
+                continue
+            }
+            // Never act through a symlinked folder: the item would really be somewhere other than where it was shown.
+            if !parentIsReal(item.url) {
+                result.failures.append((item.url, "skipped: a folder above it is a symlink"))
                 continue
             }
             do {

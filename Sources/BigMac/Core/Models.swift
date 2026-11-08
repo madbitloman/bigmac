@@ -426,7 +426,10 @@ final class AuditModel {
     private(set) var phase = Phase.idle
     /// Outcome of the last AI triage, shown after the summary until the next audit.
     private var triageNote: String?
-    var triageAfterScan = true
+    /// Off until the user turns it on: Run audit stays local unless they've chosen to send flagged items to a model.
+    var triageAfterScan = UserDefaults.standard.bool(forKey: "triageAfterScan") {
+        didSet { UserDefaults.standard.set(triageAfterScan, forKey: "triageAfterScan") }
+    }
 
     var scanning: Bool { phase == .collecting }
     var busy: Bool { phase != .idle }
@@ -470,8 +473,8 @@ final class AuditModel {
                 return .failure(.init(message: "set an https base URL in Settings"))
             }
             guard !openAIModel.isEmpty else { return .failure(.init(message: "set a model id in Settings")) }
-            // Local servers (Ollama, LM Studio) usually need no key.
-            return .success(OpenAICompatibleClient(model: openAIModel, baseURL: url, key: InferenceKeys.resolve(.openai)))
+            // Only a key saved for this very server goes with it; local servers (Ollama, LM Studio) usually need none.
+            return .success(OpenAICompatibleClient(model: openAIModel, baseURL: url, key: InferenceKeys.resolve(.openai, server: url)))
         }
     }
 

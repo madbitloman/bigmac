@@ -168,19 +168,24 @@ enum Removal {
             let result = FS.trash([(t.url, 0)])
             if result.trashed.isEmpty { asRoot.append(t) } else { out.removed.append(t.url) }
         }
-        // Root moves into a fresh folder it creates itself (mktemp: random name, 0700), so nothing planted in the
-        // user-writable Trash can redirect it; the folder is handed to the user only after the moves.
-        let trash = FS.home.appending(path: ".Trash").path
+        let stage = "/private/var/tmp/BigMac removal \(UUID().uuidString)"
         if !asRoot.isEmpty {
-            admin.append("T=\(q(trash)); [ -d \"$T\" ] && [ ! -L \"$T\" ] && D=$(mktemp -d \"$T/BigMac removal.XXXXXX\") || exit 1")
-            for (n, t) in asRoot.enumerated() {
-                admin.append("mv -n -- \(q(t.url.path)) \"$D/\"\(q("\(n + 1) \(t.url.lastPathComponent)"))")
-            }
-            admin.append("chown \(getuid()) \"$D\"")
+            let moves = rootMoves(asRoot.map(\.url), stage: stage)
+            admin += moves.commands
+            for url in moves.skipped { out.failed.append((url, "skipped: its folder can't be identified")) }
+            asRoot.removeAll { moves.skipped.contains($0.url) }
         }
         if !asRoot.isEmpty || system {
             let script = "do shell script \"\(appleScriptEscape(admin.joined(separator: "; ") + "; true"))\" with administrator privileges"
             if Shell.run("/usr/bin/osascript", ["-e", script], timeout: 300) == nil { out.cancelled = true }
+        }
+        // Root handed the staging folder to the user; it goes to the Trash like everything else.
+        if let left = try? FileManager.default.contentsOfDirectory(atPath: stage) {
+            if left.isEmpty {
+                try? FileManager.default.removeItem(atPath: stage)
+            } else if (try? FileManager.default.trashItem(at: URL(filePath: stage), resultingItemURL: nil)) == nil {
+                out.log.append("Moved items are in \(stage); drag that folder to the Trash.")
+            }
         }
         for t in asRoot {
             if FileManager.default.fileExists(atPath: t.url.path) || (try? FileManager.default.destinationOfSymbolicLink(atPath: t.url.path)) != nil {
@@ -190,6 +195,28 @@ enum Removal {
             }
         }
         return out
+    }
+
+    /// Root's half of a removal, as shell commands. Root never writes through a folder the user can change:
+    /// - it moves into `stage`, a fresh 0700 folder it creates in /private/var/tmp (root-owned and sticky, so no one
+    ///   else can rename or replace it), then gives that one folder to the user with `chown -h`;
+    /// - each move runs from inside the target's parent, and only if that parent is still the folder identified
+    ///   here (device:inode). A symlink swapped in while the password prompt is open moves nothing.
+    /// Targets whose parent can't be identified now are returned in `skipped`.
+    static func rootMoves(_ targets: [URL], stage: String) -> (commands: [String], skipped: [URL]) {
+        var commands = ["D=\(q(stage)); /bin/mkdir -m 700 -- \"$D\" || exit 1"]
+        var skipped: [URL] = []
+        for (n, url) in targets.enumerated() {
+            let lexical = url.standardizedFileURL
+            let parent = lexical.deletingLastPathComponent().resolvingSymlinksInPath().path
+            var st = stat()
+            guard lstat(parent, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { skipped.append(url); continue }
+            let name = lexical.lastPathComponent
+            commands.append("( cd -P -- \(q(parent)) && [ \"$(/usr/bin/stat -f %d:%i .)\" = \(q("\(st.st_dev):\(st.st_ino)")) ] && "
+                            + "/bin/mv -n -- \(q("./" + name)) \"$D/\"\(q("\(n + 1) \(name)")) )")
+        }
+        commands.append("/usr/sbin/chown -h \(getuid()) \"$D\"")
+        return (commands, skipped)
     }
 
     private static func q(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }

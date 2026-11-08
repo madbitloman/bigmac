@@ -47,28 +47,28 @@ struct JevSettingsView: View {
                                 Text("\(TypeSafeKey.awsProfile) · \(TypeSafeKey.awsRegion)").font(Theme.mono).foregroundStyle(Theme.secondary)
                             }
                         } else {
-                            setting("API key", keyStatus(audit.provider)) {
+                            setting("API key", keyStatus(audit.provider, server: keyServer)) {
                                 HStack(spacing: 6) {
                                     SecureField(audit.provider == .anthropic ? "sk-ant-…" : "sk-…", text: $providerKey)
                                         .textFieldStyle(.plain).font(Theme.mono)
                                         .padding(.horizontal, 8).frame(width: 200, height: 26)
                                         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
                                     Button {
-                                        InferenceKeys.save(providerKey.trimmed, for: audit.provider)
+                                        InferenceKeys.save(providerKey.trimmed, for: audit.provider, server: keyServer)
                                         providerKey = ""
                                         keyRevision += 1
                                     } label: { ActionLabel("Save") }
-                                    .buttonStyle(.primary).disabled(providerKey.trimmed.isEmpty)
+                                    .buttonStyle(.primary).disabled(providerKey.trimmed.isEmpty || (audit.provider == .openai && keyServer.flatMap(InferenceKeys.origin) == nil))
                                     Button {
-                                        InferenceKeys.delete(audit.provider)
+                                        InferenceKeys.delete(audit.provider, server: keyServer)
                                         keyRevision += 1
                                     } label: { ActionLabel("Forget") }
-                                    .buttonStyle(.ghost).disabled(InferenceKeys.read(audit.provider) == nil)
+                                    .buttonStyle(.ghost).disabled(InferenceKeys.read(audit.provider, server: keyServer) == nil)
                                 }
                                 .id(keyRevision)
                             }
                         }
-                        note("Flagged items go out under opaque ids with secrets and your home path redacted: launch-item commands, process paths, remote IPs, extension and certificate names. At most \(AuditTriage.maxCalls) calls of \(AuditTriage.batchSize) items per audit. API keys stay in your Keychain and are sent only to the provider you pick.")
+                        note("Flagged items go out under opaque ids with secrets and your home path redacted: launch-item commands, process paths, remote IPs, extension and certificate names. At most \(AuditTriage.maxCalls) calls of \(AuditTriage.batchSize) items per audit. API keys stay in your Keychain. An OpenAI-compatible key is saved for one server and only ever sent there; change the base URL and it needs its own key.")
                     }
                     section("TypeSafe Jev") {
                         setting("Status", nil) {
@@ -107,10 +107,16 @@ struct JevSettingsView: View {
         }
     }
 
-    private func keyStatus(_ provider: InferenceProvider) -> String {
-        if let env = provider.envKey, ProcessInfo.processInfo.environment[env]?.isEmpty == false { return "Using \(env) from the environment." }
-        if InferenceKeys.read(provider) != nil { return "Saved in your Keychain." }
-        return provider == .openai ? "Not needed for local servers." : "Not set."
+    /// The server an OpenAI-compatible key is saved for: the base URL, parsed exactly as AuditModel.client parses it.
+    private var keyServer: URL? { audit.provider == .openai ? URL(string: audit.openAIBaseURL) : nil }
+
+    private func keyStatus(_ provider: InferenceProvider, server: URL?) -> String {
+        if InferenceKeys.envKeyApplies(provider, server: server), let env = provider.envKey,
+           ProcessInfo.processInfo.environment[env]?.isEmpty == false { return "Using \(env) from the environment." }
+        let origin = server.flatMap(InferenceKeys.origin)
+        if InferenceKeys.read(provider, server: server) != nil { return origin.map { "Saved in your Keychain for \($0)." } ?? "Saved in your Keychain." }
+        guard provider == .openai else { return "Not set." }
+        return origin.map { "No key for \($0). Local servers usually need none." } ?? "Enter a valid base URL first."
     }
 
     private func field(_ placeholder: String, text: Binding<String>, width: CGFloat) -> some View {

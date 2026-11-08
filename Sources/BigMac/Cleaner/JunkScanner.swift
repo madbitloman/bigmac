@@ -116,7 +116,8 @@ enum JunkScanner {
         var result = CategoryResult()
         var seen = Set<String>()
         let scannedDirs = Set(dirs.map(FS.key))
-        for dir in dirs {
+        // A cache folder replaced by a symlink is skipped: its "children" would be whatever folder it points at.
+        for dir in dirs where FS.isRealDirectory(dir) {
             guard let kids = FS.children(of: dir) else { result.denied = true; continue }
             for kid in kids where seen.insert(FS.key(kid)).inserted {
                 // DiagnosticReports is scanned on its own; don't count it twice inside Logs.
@@ -132,7 +133,7 @@ enum JunkScanner {
 
     private static func wholeDirs(_ dirs: [URL], _ category: JunkCategory) -> CategoryResult {
         var result = CategoryResult()
-        for dir in dirs where FileManager.default.fileExists(atPath: dir.path) {
+        for dir in dirs where FS.isRealDirectory(dir) {
             let (size, denied) = FS.allocatedSize(of: dir)
             if denied { result.denied = true }
             if size > 0 { result.items.append(JunkItem(url: dir, category: category, size: size)) }
@@ -145,7 +146,8 @@ enum JunkScanner {
         var result = CategoryResult()
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         let keys: [URLResourceKey] = [.addedToDirectoryDateKey, .contentModificationDateKey]
-        guard let kids = FS.children(of: home.appending(path: "Downloads"), keys: keys) else {
+        // Listed at its real location, so a Downloads folder kept elsewhere via a symlink still shows (and trashes) correctly.
+        guard let kids = FS.children(of: home.appending(path: "Downloads").resolvingSymlinksInPath(), keys: keys) else {
             result.denied = true
             return result
         }

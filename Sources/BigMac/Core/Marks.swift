@@ -4,8 +4,9 @@ import Security
 
 /// The user's "false positive" and "trust this binary" marks. They are stored in defaults and signed with a
 /// secret kept in this Mac's Keychain, so a mark that another process writes into defaults doesn't count.
-/// Each mark is also bound to what the item looked like when it was marked, so swapping the program or
-/// command behind a marked path, or a binary's signer, voids the mark.
+/// Each mark is also bound to what the item looked like when it was marked: a changed command line, signer or
+/// risk signal voids it. It is not bound to the file's bytes, so replacing an unsigned binary with another unsigned
+/// binary at the same path keeps the mark.
 enum Marks {
     private static let service = "com.bigmac.marks"
     private static let account = "hmac-key"
@@ -42,8 +43,11 @@ extension AuditItem {
     /// that change on their own (age, pids, whether it happens to be running).
     var markContent: String {
         let volatileEvidence = ["created ", "pids:", "running now:", "state:"]
-        let volatileSignals: Set<String> = ["installed in the last 7 days", "currently running"]
-        let evidence = evidence.filter { e in !volatileEvidence.contains(where: e.hasPrefix) }
+        var volatileSignals: Set<String> = ["installed in the last 7 days", "currently running"]
+        if kind == .network { volatileSignals.insert(RiskSignal.unusualPort.rawValue) }  // depends on which connection was seen
+        // Connections come and go between scans; a network item's mark is about the binary.
+        let evidence = kind == .network ? evidence.filter { $0.hasPrefix("executable:") || $0.hasPrefix("signer:") }
+            : evidence.filter { e in !volatileEvidence.contains(where: e.hasPrefix) }
         return (["audit", id, title] + evidence + ["--"] + signals.filter { !volatileSignals.contains($0) }.sorted())
             .joined(separator: "\n")
     }

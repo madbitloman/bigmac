@@ -221,7 +221,7 @@ enum SelfTest {
               "launchd's Program wins over ProgramArguments[0], and the launcher's payload is found")
         let decoy = ThreatIntel.enrich([
             AuditItem(id: "e", kind: .persistence, title: launch.label,
-                      evidence: ["label: \(launch.label)", "runs: \(command.joined(separator: " "))", "signer: Apple"],
+                      evidence: ["label: \(launch.label)", "runs: \(command.joined(separator: " "))", "signer: Apple", "payload: \(HostAudit.payload(command)!)"],
                       path: URL(filePath: "/Users/me/Library/LaunchAgents/e.plist")),
             AuditItem(id: "f", kind: .persistence, title: "x",
                       evidence: ["label: com.apple.x signer: Apple", "runs: /Users/me/x", "signer: Unsigned"],
@@ -230,6 +230,9 @@ enum SelfTest {
         check(decoy[0].signals.contains { $0.contains("T1543.001") } && decoy[0].severity == .high && !decoy[0].routine,
               "a temp-folder payload behind a launcher still matches, past the 6th argument")
         check(decoy[1].signals.contains { $0.contains("T1036.005") }, "a decoy \"signer: Apple\" in the label doesn't pass as Apple-signed")
+        let socket = ThreatIntel.enrich([AuditItem(id: "g", kind: .persistence, title: "foo",
+                                                   evidence: ["runs: /opt/homebrew/bin/foo --socket /tmp/foo.sock", "signer: Ad-hoc"])])
+        check(!socket[0].signals.contains { $0.contains("T1543.001") }, "a /tmp argument alone is not a temp-folder loader")
 
         print("Model verdicts and marks")
         let benign = AuditVerdict(call: .benign, severity: .none, atRisk: "", rationale: "", action: "")
@@ -265,6 +268,10 @@ enum SelfTest {
 
         let started = Date()
         let report = await HostAudit.run()
+        // False-positive marks must survive a rescan: every item's mark content has to come out the same.
+        let again = Dictionary((await HostAudit.run()).observations.map { ($0.id, $0.markContent) }, uniquingKeysWith: { a, _ in a })
+        let drifting = report.observations.filter { o in again[o.id].map { $0 != o.markContent } ?? false }
+        check(drifting.isEmpty, "false-positive marks survive a rescan (drifting: \(drifting.map(\.id).prefix(5)))")
         let flagged = report.observations.filter { $0.severity > .none }
         print("    \(report.observations.count) observations, \(flagged.count) flagged, \(AuditTriage.candidates(report.observations).count) for Haiku, \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
         for o in flagged.sorted(by: { $0.severity > $1.severity }).prefix(12) {

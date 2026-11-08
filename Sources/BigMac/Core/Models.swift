@@ -323,7 +323,7 @@ final class NetworkModel {
     private var firstSeen: [String: Date] = [:]
     private let signatures = SignatureCache()
     /// Binaries the user marked as false positives; their connections show as OK.
-    /// Signed and bound to the binary's signer (see `Marks`): a replaced binary at the same path isn't trusted.
+    /// Signed and bound to the binary's signer (see `Marks`): a binary at the same path with a different signer isn't trusted.
     private(set) var trusted = (UserDefaults.standard.dictionary(forKey: "networkTrustMarks") as? [String: String]) ?? [:] {
         didSet { UserDefaults.standard.set(trusted, forKey: "networkTrustMarks") }
     }

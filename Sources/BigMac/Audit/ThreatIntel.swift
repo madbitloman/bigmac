@@ -21,8 +21,9 @@ enum ThreatIntel {
     static let rules: [Rule] = [
         Rule(name: "launch item runs from a temp or shared folder (Adload/Shlayer-style loader)", technique: "T1543.001",
              floor: .high, kinds: [.persistence],
-             // Anywhere on the runs: line, so a launcher in front (env, nohup, sh) doesn't hide the payload's folder.
-             matches: re(#"(runs|payload):[^\n]*?[\s=:'"]((/private)?/tmp/|/Users/Shared/|(/private)?/var/folders/)"#)),
+             // The program itself, or the payload a launcher in front of it (env, nohup, sh) is handed.
+             // Not any argument: `--socket /tmp/x.sock` is normal.
+             matches: re(#"(runs|payload): ((/private)?/tmp/|/Users/Shared/|(/private)?/var/folders/)"#)),
         Rule(name: "launch item runs a binary hidden in a dot-folder under Library", technique: "T1564.001",
              floor: .medium, kinds: [.persistence, .process],
              matches: re(#"Library/(Application Support|Caches)/\.[^/\s]+/"#)),

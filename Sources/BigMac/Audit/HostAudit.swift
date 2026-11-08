@@ -162,6 +162,14 @@ enum HostAudit {
         return command.dropFirst().first { $0.hasPrefix("/") && !systemDirs.contains(where: $0.hasPrefix) }
     }
 
+    /// Mach-O magic numbers (thin and fat, either byte order); scripts and other files are not.
+    static func isMachO(_ path: String) -> Bool {
+        guard let h = FileHandle(forReadingAtPath: path), let d = try? h.read(upToCount: 4), d.count == 4 else { return false }
+        try? h.close()
+        let magic = d.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
+        return [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe, 0xbebafeca].contains(magic)
+    }
+
     /// Evidence lines stay single lines, so a newline in a plist value can't split what the rules read.
     static func oneLine(_ s: String) -> String { s.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ") }
 
@@ -206,8 +214,18 @@ enum HostAudit {
                 signals += commandSignals(runs)
                 // A launcher or interpreter is Apple-signed; where its payload lives is the real signal.
                 let payload = payload(command)
+                var payloadSigner: String?
                 if let payload {
-                    signals += RiskSignal.binary(path: payload, signer: .unknown).filter { $0 != .noExecutable }.map(\.rawValue)
+                    var ps = Signer.unknown
+                    if FileManager.default.isReadableFile(atPath: payload) {
+                        ps = await signatures.signer(for: payload)
+                        payloadSigner = ps.label
+                    } else if FileManager.default.fileExists(atPath: payload) {
+                        payloadSigner = "not checked — root-only"
+                    }
+                    // A script payload is never code-signed; only judge the signature of a real binary.
+                    if ps == .unsigned, !isMachO(payload) { ps = .unknown }
+                    signals += RiskSignal.binary(path: payload, signer: ps).filter { $0 != .noExecutable }.map(\.rawValue)
                         .filter { !signals.contains($0) }
                 }
                 if let created, Date().timeIntervalSince(created) < 7 * 86400 { signals.append("installed in the last 7 days") }
@@ -215,7 +233,10 @@ enum HostAudit {
                 var evidence = ["plist: \(FS.tildePath(url))", "label: \(oneLine(item.label))",
                                 "runs: \(runs.prefix(2000))",
                                 "signer: \(signerNote ?? signer.label)"]
-                if let payload { evidence.append("payload: \(oneLine(payload))") }
+                if let payload {
+                    evidence.append("payload: \(oneLine(payload))")
+                    if let payloadSigner { evidence.append("payload signer: \(payloadSigner)") }
+                }
                 if item.runAtLoad || item.keepAlive { evidence.append("starts \(item.runAtLoad ? "at login/boot" : "")\(item.keepAlive ? " and is kept alive" : "")") }
                 if let created { evidence.append("created \(FS.ago(created))") }
                 let level = signals.contains("target binary is missing") && signals.count == 1 ? .low : level(for: signals)

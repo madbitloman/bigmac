@@ -103,8 +103,14 @@ struct TypeSafeClient: Sendable {
 /// Resolves the TypeSafe API key: env var → Keychain → one-time fetch from AWS SSM.
 /// The AWS profile and parameter name are per-machine settings (`defaults write com.bigmac.app awsProfile …`).
 enum TypeSafeKey {
-    static var ssmName: String { UserDefaults.standard.string(forKey: "typesafeSSMName") ?? "/bigmac/typesafe-api-key" }
-    static var awsProfile: String { UserDefaults.standard.string(forKey: "awsProfile") ?? "default" }
+    /// Values from defaults are checked against what AWS allows, so they can't smuggle extra aws options.
+    static var ssmName: String { valid(UserDefaults.standard.string(forKey: "typesafeSSMName"), #"^/?[A-Za-z0-9_.\-/]{1,1011}$"#) ?? "/bigmac/typesafe-api-key" }
+    static var awsProfile: String { valid(UserDefaults.standard.string(forKey: "awsProfile"), #"^[A-Za-z0-9_.@+\-]{1,64}$"#) ?? "default" }
+
+    private static func valid(_ value: String?, _ pattern: String) -> String? {
+        guard let value, value.range(of: pattern, options: .regularExpression) != nil else { return nil }
+        return value
+    }
     static let awsRegion = "us-east-1"
     private static let service = "com.bigmac.typesafe"
     private static let account = "api-key"

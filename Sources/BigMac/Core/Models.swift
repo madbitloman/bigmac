@@ -323,14 +323,19 @@ final class NetworkModel {
     private var firstSeen: [String: Date] = [:]
     private let signatures = SignatureCache()
     /// Binaries the user marked as false positives; their connections show as OK.
-    private(set) var trusted = Set(UserDefaults.standard.stringArray(forKey: "networkTrusted") ?? []) {
-        didSet { UserDefaults.standard.set(Array(trusted).sorted(), forKey: "networkTrusted") }
+    /// Signed and bound to the binary's signer (see `Marks`): a replaced binary at the same path isn't trusted.
+    private(set) var trusted = (UserDefaults.standard.dictionary(forKey: "networkTrustMarks") as? [String: String]) ?? [:] {
+        didSet { UserDefaults.standard.set(trusted, forKey: "networkTrustMarks") }
+    }
+
+    private func isTrusted(_ path: String, _ signer: Signer) -> Bool {
+        Marks.verify(trusted[path], ConnectionRow.trustContent(path: path, signer: signer))
     }
 
     func setTrusted(_ row: ConnectionRow, _ on: Bool) {
         guard let path = row.exePath else { return }
-        if on { trusted.insert(path) } else { trusted.remove(path) }
-        for i in rows.indices where rows[i].exePath == path { rows[i].trusted = on }
+        trusted[path] = on ? Marks.seal(ConnectionRow.trustContent(path: path, signer: row.signer)) : nil
+        for i in rows.indices where rows[i].exePath == path { rows[i].trusted = isTrusted(path, rows[i].signer) }
     }
     private var loop: Task<Void, Never>?
     private let launched = Date()
@@ -381,7 +386,7 @@ final class NetworkModel {
                 firstSeen[c.id] = seen
                 fresh.append(ConnectionRow(connection: c, exePath: path, signer: signer,
                                            signals: RiskSignal.evaluate(c, exePath: path, signer: signer), firstSeen: seen,
-                                           trusted: path.map(trusted.contains) ?? false))
+                                           trusted: path.map { isTrusted($0, signer) } ?? false))
             }
             rows = fresh.sorted { ($0.level, jev[$0.jevKey]?.value ?? 0) > ($1.level, jev[$1.jevKey]?.value ?? 0) }
             let flagged = rows.filter { $0.level >= .medium }.count
@@ -479,23 +484,34 @@ final class AuditModel {
     }
 
     /// False positives the user marked, by fingerprint (value is the title, for display in Settings/debugging).
-    /// Fingerprints are path-based, so marks survive rescans; dismissed items are never sent to Haiku.
-    private(set) var dismissed = (UserDefaults.standard.dictionary(forKey: "auditDismissed") as? [String: String]) ?? [:] {
-        didSet { UserDefaults.standard.set(dismissed, forKey: "auditDismissed") }
+    /// Marks are keyed by item id and signed over the item's content (see `Marks`), so they survive rescans but not
+    /// a changed program or command, and a mark written into defaults by something else doesn't count.
+    /// Dismissed items are never sent to the model.
+    private(set) var dismissed = (UserDefaults.standard.dictionary(forKey: "auditMarks") as? [String: String]) ?? [:] {
+        didSet { UserDefaults.standard.set(dismissed, forKey: "auditMarks") }
     }
 
-    func isDismissed(_ o: AuditItem) -> Bool { dismissed[o.id] != nil }
+    func isDismissed(_ o: AuditItem) -> Bool { Marks.verify(dismissed[o.id], o.markContent) }
 
     func setDismissed(_ o: AuditItem, _ on: Bool) {
-        dismissed[o.id] = on ? o.title : nil
+        dismissed[o.id] = on ? Marks.seal(o.markContent) : nil
     }
 
-    /// Haiku's call wins over the heuristic once it has judged an item; a false-positive mark wins over both.
-    /// A known-technique match is a floor the model can't lower, since the evidence it reads is attacker-written.
+    /// The model's call adjusts the measured severity once it has judged an item; a false-positive mark wins over both.
+    /// The evidence the model reads is partly attacker-written, so it can't hide what code measured:
+    /// a known-technique match can't be lowered at all, anything else by at most one level.
     func severity(_ o: AuditItem) -> RiskLevel {
         if isDismissed(o) { return .none }
         guard let verdict = verdicts[o.id] else { return o.severity }
-        return o.signals.contains(where: { $0.hasPrefix("known technique:") }) ? max(verdict.severity, o.severity) : verdict.severity
+        return Self.combine(measured: o.severity, verdict: verdict,
+                            knownTechnique: o.signals.contains(where: { $0.hasPrefix("known technique:") }))
+    }
+
+    nonisolated static func combine(measured: RiskLevel, verdict: AuditVerdict, knownTechnique: Bool) -> RiskLevel {
+        let floor = knownTechnique ? measured : RiskLevel(rawValue: max(0, measured.rawValue - 1)) ?? .none
+        // A model that calls something suspicious never gets it shown as OK.
+        let modelSays = verdict.call == .confirmed ? max(verdict.severity, .low) : verdict.severity
+        return max(modelSays, floor)
     }
 
     func run() async {

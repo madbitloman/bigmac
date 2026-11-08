@@ -21,7 +21,8 @@ enum ThreatIntel {
     static let rules: [Rule] = [
         Rule(name: "launch item runs from a temp or shared folder (Adload/Shlayer-style loader)", technique: "T1543.001",
              floor: .high, kinds: [.persistence],
-             matches: re(#"runs: (/private)?/tmp/|runs: /Users/Shared/|runs: /var/folders/"#)),
+             // Anywhere on the runs: line, so a launcher in front (env, nohup, sh) doesn't hide the payload's folder.
+             matches: re(#"(runs|payload):[^\n]*?[\s=:'"]((/private)?/tmp/|/Users/Shared/|(/private)?/var/folders/)"#)),
         Rule(name: "launch item runs a binary hidden in a dot-folder under Library", technique: "T1564.001",
              floor: .medium, kinds: [.persistence, .process],
              matches: re(#"Library/(Application Support|Caches)/\.[^/\s]+/"#)),
@@ -49,9 +50,10 @@ enum ThreatIntel {
         Rule(name: "user launch agent impersonating Apple (com.apple.* label, not Apple-signed)", technique: "T1036.005",
              floor: .high, kinds: [.persistence],
              matches: { item, text in
+                 // Signer comes from the code-written "signer:" line only: a label or argument saying "signer: Apple" doesn't count.
                  item.path?.path.contains("/Users/") == true
                      && text.range(of: "label: com.apple.", options: .caseInsensitive) != nil
-                     && text.range(of: "signer: Apple", options: .caseInsensitive) == nil
+                     && !item.evidence.contains { $0 == "signer: Apple" }
              }),
         Rule(name: "trusted root from known HTTPS-intercepting adware (Wajam, Superfish, Komodia, PrivDog, eDellRoot)",
              technique: "T1553.004", floor: .high, kinds: [.interception],

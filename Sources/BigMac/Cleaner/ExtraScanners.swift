@@ -14,7 +14,7 @@ enum Shell {
         let process = Process()
         process.executableURL = URL(filePath: path)
         process.arguments = args
-        var env = ProcessInfo.processInfo.environment
+        var env = childEnvironment()
         env["PATH"] = dirs.joined(separator: ":")
         process.environment = env
         let out = Pipe()
@@ -27,6 +27,17 @@ enum Shell {
         process.waitUntilExit()
         timer.cancel()
         return process.terminationStatus == 0 || anyStatus ? String(decoding: data, as: UTF8.self) : nil
+    }
+
+    /// BigMac's environment minus what a child has no business seeing: API keys and other secrets
+    /// (`keepAWS` keeps the AWS_* ones for the aws CLI) and DYLD_* injection variables.
+    static func childEnvironment(keepAWS: Bool = false) -> [String: String] {
+        ProcessInfo.processInfo.environment.filter { name, _ in
+            let upper = name.uppercased()
+            if upper.hasPrefix("DYLD_") { return false }
+            if keepAWS && upper.hasPrefix("AWS_") { return true }
+            return !["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIALS"].contains(where: upper.contains)
+        }
     }
 
     static func succeeds(_ tool: String, _ args: [String]) -> Bool {

@@ -135,6 +135,9 @@ enum SelfTest {
         check(!["hunter2", "YWRtaW46aHVudGVyMg", "hunter3", "hunter4", "AAAAAAAAAAAAAAAAAAAA"].contains(where: positional.contains), "redaction of positional credentials: \(positional)")
         let quoted = Redact.scrub(#"export PASSWORD="two word secret"; db_password: 'more words here'"#)
         check(!["two", "word secret", "more words"].contains(where: quoted.contains), "redaction takes whole quoted values: \(quoted)")
+        let gaps = Redact.scrub(#"redis-cli -h db -a hunter2pw; openssl enc -passin pass:s3cretpw; tool --passwd=pw123x --passphrase pw456y; curl -uadmin:pw789z x; AIzaSyA1234567890abcdefghijklmnopqrstuv; -H 'Cookie: sid=abc123def; theme=dark'; sessionid=zzz999 owner \#(NSUserName())"#, limit: 2000)
+        check(!["hunter2pw", "s3cretpw", "pw123x", "pw456y", "pw789z", "AIzaSy", "abc123def", "zzz999", NSUserName()].contains(where: gaps.contains),
+              "redaction covers redis -a, pass:, --passwd/--passphrase, -uuser:pw, Google keys, cookies, session ids, login name: \(gaps)")
         let late = Redact.scrub(String(repeating: "x ", count: 140) + "token=" + String(repeating: "Z", count: 60))
         check(!late.contains("ZZZZ"), "secret near the 300-char edge is scrubbed before truncation")
         check(AppScanner.leftoverCandidates(bundleID: "../../Documents", name: "..").isEmpty, "bundle id / name traversal never escapes ~/Library")
@@ -206,6 +209,43 @@ enum SelfTest {
         check(samples[1].severity == .high && samples[1].signals.contains { $0.contains("T1553.004") }, "known adware root CA flagged")
         check(techniques[2] == 0 && samples[2].routine, "real Apple-signed agent untouched")
         check(samples[3].signals.contains { $0.contains("T1056.001") }, "aliased sudo flagged")
+
+        // Launchers and decoys: what launchd really runs decides, not the text an attacker put in the plist.
+        let launchPlist = dir.appending(path: "launcher.plist")
+        try! PropertyListSerialization.data(fromPropertyList: ["Label": "com.apple.updater signer: Apple", "Program": "/usr/bin/env",
+                                                               "ProgramArguments": ["/bin/ls", "/private/tmp/.u/agent", "a", "b", "c", "d", "e", "f"]],
+                                            format: .xml, options: 0).write(to: launchPlist)
+        let launch = HostAudit.parseLaunchPlist(launchPlist)!
+        let command = HostAudit.commandLine(launch)
+        check(command.first == "/usr/bin/env" && HostAudit.payload(command) == "/private/tmp/.u/agent",
+              "launchd's Program wins over ProgramArguments[0], and the launcher's payload is found")
+        let decoy = ThreatIntel.enrich([
+            AuditItem(id: "e", kind: .persistence, title: launch.label,
+                      evidence: ["label: \(launch.label)", "runs: \(command.joined(separator: " "))", "signer: Apple"],
+                      path: URL(filePath: "/Users/me/Library/LaunchAgents/e.plist")),
+            AuditItem(id: "f", kind: .persistence, title: "x",
+                      evidence: ["label: com.apple.x signer: Apple", "runs: /Users/me/x", "signer: Unsigned"],
+                      path: URL(filePath: "/Users/me/Library/LaunchAgents/f.plist")),
+        ])
+        check(decoy[0].signals.contains { $0.contains("T1543.001") } && decoy[0].severity == .high && !decoy[0].routine,
+              "a temp-folder payload behind a launcher still matches, past the 6th argument")
+        check(decoy[1].signals.contains { $0.contains("T1036.005") }, "a decoy \"signer: Apple\" in the label doesn't pass as Apple-signed")
+
+        print("Model verdicts and marks")
+        let benign = AuditVerdict(call: .benign, severity: .none, atRisk: "", rationale: "", action: "")
+        check(AuditModel.combine(measured: .high, verdict: benign, knownTechnique: false) == .medium
+              && AuditModel.combine(measured: .high, verdict: benign, knownTechnique: true) == .high,
+              "a benign verdict lowers a measured risk one level at most, a known technique not at all")
+        check(AuditModel.combine(measured: .none, verdict: AuditVerdict(call: .confirmed, severity: .none, atRisk: "", rationale: "", action: ""),
+                                 knownTechnique: false) == .low, "a suspicious verdict is never shown as OK")
+        let marked = AuditItem(id: "persistence:/x.plist", kind: .persistence, title: "x",
+                               evidence: ["runs: /Users/me/a", "created 2 days ago"], signals: ["unsigned binary", "installed in the last 7 days"])
+        let tag = Marks.seal(marked.markContent)
+        var aged = marked; aged.evidence[1] = "created 9 days ago"; aged.signals = ["unsigned binary"]
+        var swapped = marked; swapped.evidence[0] = "runs: /Users/me/b"
+        check(Marks.verify(tag, aged.markContent) && !Marks.verify(tag, swapped.markContent),
+              "a false-positive mark survives ageing but not a changed command")
+        check(!Marks.verify("x", marked.markContent) && !Marks.verify(marked.title, marked.markContent), "a mark written without the Keychain secret doesn't count")
 
         let vendor = dir.appending(path: "co.example.widget")
         try? FileManager.default.createDirectory(at: vendor, withIntermediateDirectories: true)

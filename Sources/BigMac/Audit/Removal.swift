@@ -22,9 +22,20 @@ struct RemovalPlan: Sendable {
 
 enum Removal {
     /// Tools that change system state while running and have a documented way to hand it back.
-    static let cleanupHooks: [(match: String, args: [String], why: String)] = [
-        ("/co.palokaj.battery/", ["maintain", "stop"], "Stops the charge limiter and turns normal charging back on"),
+    /// Commands BigMac runs before removing a known tool. Only from the tool's own install folder, and only when that
+    /// program is root-owned and not writable by you, so a look-alike plist can't get BigMac to run its program.
+    static let cleanupHooks: [(prefix: String, args: [String], why: String)] = [
+        ("/usr/local/co.palokaj.battery/", ["maintain", "stop"], "Stops the charge limiter and turns normal charging back on"),
     ]
+
+    static func hookAllowed(_ program: String, prefix: String) -> Bool {
+        let url = URL(filePath: program)
+        guard url.standardizedFileURL.path.hasPrefix(prefix), FS.parentIsReal(url),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: program),
+              attrs[.type] as? FileAttributeType == .typeRegular,
+              (attrs[.ownerAccountID] as? NSNumber)?.intValue == 0 else { return false }
+        return FileManager.default.isExecutableFile(atPath: program) && !FileManager.default.isWritableFile(atPath: program)
+    }
 
     private static let systemPrefixes = ["/System/", "/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/libexec/", "/Library/Apple/"]
     private static let sharedDirs: Set<String> = [
@@ -49,7 +60,7 @@ enum Removal {
         if let program, !systemPrefixes.contains(where: program.hasPrefix) {
             let url = URL(filePath: program)
             let name = url.lastPathComponent.lowercased()
-            if let h = cleanupHooks.first(where: { program.contains($0.match) }), FileManager.default.isExecutableFile(atPath: program) {
+            if let h = cleanupHooks.first(where: { hookAllowed(program, prefix: $0.prefix) }) {
                 hook = (h.args, h.why)
             }
             // Inside an app bundle: offer the bundle, unticked, since a helper may belong to a bigger app.

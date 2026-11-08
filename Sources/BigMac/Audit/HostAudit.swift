@@ -143,9 +143,30 @@ enum HostAudit {
         }
     }
 
+    static let interpreters: Set<String> = ["sh", "bash", "zsh", "ksh", "csh", "tcsh", "dash", "fish", "python", "python3", "osascript",
+                                            "perl", "ruby", "node", "php", "lua", "tclsh", "swift", "pwsh", "curl"]
+    /// Apple-signed programs whose only job is to start another one; the program they start is what matters.
+    static let launchers: Set<String> = ["env", "nohup", "arch", "xargs", "open", "nice", "caffeinate", "sudo", "script", "timeout", "time"]
+    private static let systemDirs = ["/System/", "/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/libexec/"]
+
+    /// What launchd actually runs: `Program` when set (launchd prefers it), with `ProgramArguments[1...]` as its arguments.
+    static func commandLine(_ item: LaunchItem) -> [String] {
+        guard let program = item.program else { return item.arguments }
+        return [program] + item.arguments.dropFirst()
+    }
+
+    /// For a launcher or interpreter, the first non-system absolute path it's handed: the code that really runs.
+    static func payload(_ command: [String]) -> String? {
+        guard let first = command.first,
+              launchers.contains(URL(filePath: first).lastPathComponent) || interpreters.contains(URL(filePath: first).lastPathComponent) else { return nil }
+        return command.dropFirst().first { $0.hasPrefix("/") && !systemDirs.contains(where: $0.hasPrefix) }
+    }
+
+    /// Evidence lines stay single lines, so a newline in a plist value can't split what the rules read.
+    static func oneLine(_ s: String) -> String { s.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ") }
+
     static func persistence(_ signatures: SignatureCache) async -> [AuditItem] {
         var out: [AuditItem] = []
-        let interpreters: Set<String> = ["sh", "bash", "zsh", "python", "python3", "osascript", "perl", "ruby", "node", "curl"]
         for dir in launchDirs {
             for url in FS.children(of: dir) ?? [] where url.pathExtension == "plist" {
                 let created = (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
@@ -176,16 +197,25 @@ enum HostAudit {
                     } else {
                         signals.append("target binary is missing")
                     }
-                    if interpreters.contains(URL(filePath: program).lastPathComponent) {
-                        signals.append("runs an interpreter (\(URL(filePath: program).lastPathComponent))")
-                    }
+                    let name = URL(filePath: program).lastPathComponent
+                    if interpreters.contains(name) { signals.append("runs an interpreter (\(name))") }
+                    if launchers.contains(name) { signals.append("starts another program via \(name)") }
                 }
-                signals += commandSignals(item.arguments.joined(separator: " "))
+                let command = commandLine(item)
+                let runs = oneLine(command.joined(separator: " "))
+                signals += commandSignals(runs)
+                // A launcher or interpreter is Apple-signed; where its payload lives is the real signal.
+                let payload = payload(command)
+                if let payload {
+                    signals += RiskSignal.binary(path: payload, signer: .unknown).filter { $0 != .noExecutable }.map(\.rawValue)
+                        .filter { !signals.contains($0) }
+                }
                 if let created, Date().timeIntervalSince(created) < 7 * 86400 { signals.append("installed in the last 7 days") }
 
-                var evidence = ["plist: \(FS.tildePath(url))", "label: \(item.label)",
-                                "runs: \(item.arguments.isEmpty ? item.program ?? "?" : item.arguments.prefix(6).joined(separator: " "))",
+                var evidence = ["plist: \(FS.tildePath(url))", "label: \(oneLine(item.label))",
+                                "runs: \(runs.prefix(2000))",
                                 "signer: \(signerNote ?? signer.label)"]
+                if let payload { evidence.append("payload: \(oneLine(payload))") }
                 if item.runAtLoad || item.keepAlive { evidence.append("starts \(item.runAtLoad ? "at login/boot" : "")\(item.keepAlive ? " and is kept alive" : "")") }
                 if let created { evidence.append("created \(FS.ago(created))") }
                 let level = signals.contains("target binary is missing") && signals.count == 1 ? .low : level(for: signals)

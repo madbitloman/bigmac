@@ -299,6 +299,10 @@ struct RemovalSheet: View {
                     HStack(spacing: 10) {
                         Image(systemName: "checkmark.circle").font(.system(size: 12)).foregroundStyle(Theme.green).frame(width: 14)
                         Text("First: \(hook.why)").font(Theme.body).foregroundStyle(Theme.text)
+                        if let program = plan.program {
+                            Text("runs \(FS.tildePath(URL(filePath: program))) \(hook.args.joined(separator: " "))")
+                                .font(Theme.mono).foregroundStyle(Theme.tertiary).lineLimit(1).truncationMode(.middle)
+                        }
                     }
                     .padding(.horizontal, 16).frame(height: 34)
                 }

@@ -7,17 +7,22 @@ struct AWSError: LocalizedError {
 
 /// Runs the aws CLI, resolving it explicitly because GUI apps don't inherit the shell PATH.
 enum AWSCLI {
-    static func run(_ args: [String], timeout: TimeInterval = 90) throws -> Data {
+    /// Where aws lives: the usual install paths, else whatever the user's login shell finds. The shell only runs a
+    /// fixed `command -v aws`; arguments (some come from defaults) are never put into a shell command line.
+    static func locate() -> String? {
         let candidates = ["/opt/homebrew/bin/aws", "/usr/local/bin/aws", "/usr/bin/aws"]
+        if let aws = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) { return aws }
+        let found = Shell.run("/bin/zsh", ["-lc", "command -v aws"], timeout: 15)?
+            .split(separator: "\n").last.map { String($0).trimmed }
+        return found.flatMap { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil }
+    }
+
+    static func run(_ args: [String], timeout: TimeInterval = 90) throws -> Data {
+        guard let aws = locate() else { throw AWSError(message: "aws CLI not found; install it (brew install awscli)") }
         let process = Process()
-        if let aws = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            process.executableURL = URL(filePath: aws)
-            process.arguments = args
-        } else {
-            // Fall back to a login shell that knows the user's PATH.
-            process.executableURL = URL(filePath: "/bin/zsh")
-            process.arguments = ["-lc", "aws " + args.map { "'\($0)'" }.joined(separator: " ")]
-        }
+        process.executableURL = URL(filePath: aws)
+        process.arguments = args
+        process.environment = Shell.childEnvironment(keepAWS: true)
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
@@ -98,11 +103,15 @@ enum Redact {
     static let patterns: [(String, String)] = [
         (#"AKIA[0-9A-Z]{16}"#, "<aws-key>"),
         (#"(?i)bearer\s+[A-Za-z0-9._~+/=-]+"#, "Bearer <redacted>"),
-        (#"(?i)((?:token|secret|passw(?:or)?d|pwd|api[_-]?key|auth|credential)s?["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s"'&]+)"#, "$1<redacted>"),
-        (#"(?i)(--?(?:token|secret|password|pass|key|auth)[=\s]+)\S+"#, "$1<redacted>"),
+        (#"\bAIza[0-9A-Za-z_-]{35}\b"#, "<google-key>"),
+        (#"(?i)\b((?:set-)?cookie["']?\s*[=:]\s*)[^\n"']+"#, "$1<redacted>"),
+        (#"(?i)((?:token|secret|passw(?:or)?d|passphrase|pwd|api[_-]?key|auth|credential|session(?:[_-]?id)?|sid)s?["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s"'&;]+)"#, "$1<redacted>"),
+        (#"(?i)(--?(?:token|secret|password|passwd|passphrase|pass|pwd|key|auth)[=\s]+)\S+"#, "$1<redacted>"),
+        (#"(\bredis-cli\b[^\n]*?\s-a\s+)\S+"#, "$1<redacted>"),
+        (#"(?i)\b((?:pass|env|file):)(?=\S)(?!//)\S+"#, "$1<redacted>"),
         (#"(?i)(authorization["']?\s*[=:]\s*["']?(?:basic|digest|token)?\s*)[^\s"']+"#, "$1<redacted>"),
         (#"(?i)\b(basic\s+)[A-Za-z0-9+/=]{8,}"#, "$1<redacted>"),
-        (#"(\s-(?:u|-user)[=\s]+)[^\s:]+:\S+"#, "$1<user>:<redacted>"),
+        (#"(\s-(?:u|-user)[=\s]*)[^\s:]+:\S+"#, "$1<user>:<redacted>"),
         (#"(\bsshpass\s+-p\s*)\S+"#, "$1<redacted>"),
         (#"(\b(?:mysql|mysqldump|mariadb)\b[^\n]*?\s-p)[^\s-]\S*"#, "$1<redacted>"),
         (#"\bbot\d{6,}:[A-Za-z0-9_-]{30,}"#, "<bot-token>"),
@@ -114,6 +123,12 @@ enum Redact {
 
     static func scrub(_ text: String, limit: Int = 300) -> String {
         var s = text.replacingOccurrences(of: FS.home.path, with: "~")
+        // The login name on its own (owner columns, "user oleks"), as a whole word only.
+        let login = NSUserName()
+        if login.count >= 3 {
+            s = s.replacingOccurrences(of: #"\b\#(NSRegularExpression.escapedPattern(for: login))\b"#, with: "<login>",
+                                       options: [.regularExpression, .caseInsensitive])
+        }
         for (pattern, template) in patterns {
             s = s.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
         }

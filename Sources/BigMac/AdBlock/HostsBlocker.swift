@@ -111,6 +111,36 @@ enum HostsBlocker {
 
     // MARK: Installing
 
+    /// The AppleScript that runs `rootScript`, with or without the admin prompt. The self-test runs it without,
+    /// against a fixture file, so the exact command string that root runs is exercised.
+    static func appleScript(blockFile: String, hash: String, hosts: String = hostsPath, flush: Bool = true, admin: Bool) -> String {
+        let shell = rootScript(blockFile: blockFile, hash: hash, hosts: hosts, flush: flush).joined(separator: "\n")
+        return "do shell script \"\(Removal.appleScriptEscape(shell))\"" + (admin ? " with administrator privileges" : "")
+    }
+
+    /// Root's half: copy the block into a fresh folder only root can write, check its SHA-256 against what BigMac
+    /// wrote, refuse a damaged section, then splice. Each check exits on its own, since set -e doesn't stop on a
+    /// failed test inside an && list.
+    static func rootScript(blockFile: String, hash: String, hosts: String, flush: Bool) -> [String] {
+        let q = Removal.q
+        let h = q(hosts)
+        return [
+            "set -e",
+            "S=$(/usr/bin/mktemp -d /private/var/tmp/bigmac-hosts.XXXXXX)",
+            "trap '/bin/rm -rf \"$S\"' EXIT",
+            "/bin/cat < \(q(blockFile)) > \"$S/block\"",
+            "[ \"$(/usr/bin/shasum -a 256 \"$S/block\" | /usr/bin/cut -d ' ' -f 1)\" = \(q(hash)) ] || exit 1",
+            "B=$(/usr/bin/grep -c \(q("^" + beginPrefix)) \(h) || true)",
+            "E=$(/usr/bin/grep -cx \(q(endLine)) \(h) || true)",
+            "[ \"$B\" = \"$E\" ] || exit 1",
+            "[ \"$B\" -le 1 ] || exit 1",
+            "/usr/bin/awk \(q(awkProgram)) \(h) > \"$S/hosts\"",
+            "/bin/cat \"$S/block\" >> \"$S/hosts\"",
+            // cat into the existing file keeps its owner (root:wheel) and mode (0644).
+            "/bin/cat \"$S/hosts\" > \(h)",
+        ] + (flush ? ["/usr/bin/dscacheutil -flushcache", "/usr/bin/killall -HUP mDNSResponder || true"] : [])
+    }
+
     /// What root runs to drop the old block; the self-test checks it against `splice`.
     static let awkProgram = "index($0, \"\(beginPrefix)\") == 1 {s=1} !s {print} $0 == \"\(endLine)\" {s=0}"
 
@@ -131,27 +161,8 @@ enum HostsBlocker {
         do { try Data(block.utf8).write(to: file) } catch { return error.localizedDescription }
         let hash = SHA256.hash(data: Data(block.utf8)).map { String(format: "%02x", $0) }.joined()
 
-        let q = Removal.q
-        let commands = [
-            "set -e",
-            "S=$(/usr/bin/mktemp -d /private/var/tmp/bigmac-hosts.XXXXXX)",
-            "trap '/bin/rm -rf \"$S\"' EXIT",
-            "/bin/cat < \(q(file.path)) > \"$S/block\"",
-            // Each check exits on its own: set -e doesn't stop on a failed test inside an && list.
-            "[ \"$(/usr/bin/shasum -a 256 \"$S/block\" | /usr/bin/cut -d ' ' -f 1)\" = \(q(hash)) ] || exit 1",
-            "B=$(/usr/bin/grep -c \(q("^" + beginPrefix)) \(hostsPath) || true)",
-            "E=$(/usr/bin/grep -cx \(q(endLine)) \(hostsPath) || true)",
-            "[ \"$B\" = \"$E\" ] || exit 1",
-            "[ \"$B\" -le 1 ] || exit 1",
-            "/usr/bin/awk \(q(awkProgram)) \(hostsPath) > \"$S/hosts\"",
-            "/bin/cat \"$S/block\" >> \"$S/hosts\"",
-            // cat into the existing file keeps its owner (root:wheel) and mode (0644).
-            "/bin/cat \"$S/hosts\" > \(hostsPath)",
-            "/usr/bin/dscacheutil -flushcache",
-            "/usr/bin/killall -HUP mDNSResponder || true",
-        ]
-        let script = "do shell script \"\(Removal.appleScriptEscape(commands.joined(separator: "\n")))\" with administrator privileges"
-        if Shell.run("/usr/bin/osascript", ["-e", script], timeout: 120) == nil {
+        // Same 5-minute allowance as Removal: the clock runs while the password prompt is open.
+        if Shell.run("/usr/bin/osascript", ["-e", appleScript(blockFile: file.path, hash: hash, admin: true)], timeout: 300) == nil {
             let now = (try? String(contentsOfFile: hostsPath, encoding: .utf8)) ?? ""
             return now == current ? "Cancelled, or the admin script failed; /etc/hosts is unchanged." : nil
         }

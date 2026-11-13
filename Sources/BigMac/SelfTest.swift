@@ -1,7 +1,8 @@
 import Foundation
-import WebKit
 
 #if DEBUG  // Never compiled into the release app (see main.swift).
+import CryptoKit
+import WebKit
 
 /// Headless checks: `BigMac --selftest <fixture-dir> [--jev] [--bedrock]`.
 /// Only writes inside the fixture dir; scans of the real home folder are read-only.
@@ -85,6 +86,30 @@ enum SelfTest {
         try? (once + "# after\n").write(to: awkInput, atomically: true, encoding: .utf8)
         let awkOut = Shell.run("/usr/bin/awk", [HostsBlocker.awkProgram, awkInput.path])
         check(awkOut == (try? HostsBlocker.splice(once + "# after\n", block: "")), "root's awk removes exactly what splice removes")
+
+        // The exact AppleScript and shell that root runs, here without the admin prompt and on a fixture file.
+        func runRoot(_ hostsText: String, block: String, tamper: Bool = false) -> (ok: Bool, after: String) {
+            let hostsFile = dir.appending(path: "hosts-root-\(UUID().uuidString.prefix(6))")
+            let blockFile = dir.appending(path: "block-\(UUID().uuidString.prefix(6))")
+            try? hostsText.write(to: hostsFile, atomically: true, encoding: .utf8)
+            try? block.write(to: blockFile, atomically: true, encoding: .utf8)
+            let hash = SHA256.hash(data: Data(block.utf8)).map { String(format: "%02x", $0) }.joined()
+            if tamper { try? (block + "6.6.6.6 yourbank.com\n").write(to: blockFile, atomically: true, encoding: .utf8) }
+            let script = HostsBlocker.appleScript(blockFile: blockFile.path, hash: hash, hosts: hostsFile.path, flush: false, admin: false)
+            let ok = Shell.run("/usr/bin/osascript", ["-e", script], timeout: 30) != nil
+            return (ok, (try? String(contentsOf: hostsFile, encoding: .utf8)) ?? "")
+        }
+        let installed = runRoot(base, block: block)
+        check(installed.ok && installed.after == once, "root script installs exactly what splice computes")
+        let reapplied = runRoot(installed.after, block: block)
+        check(reapplied.ok && reapplied.after == once, "running the root script twice changes nothing")
+        let removed = runRoot(installed.after, block: "")
+        check(removed.ok && removed.after == base, "root script with an empty block restores the original")
+        let tampered = runRoot(base, block: block, tamper: true)
+        check(!tampered.ok && tampered.after == base, "a block file changed after hashing is refused; hosts untouched")
+        let doubled = once + HostsBlocker.block(for: ["y.example"])
+        let refused = runRoot(doubled, block: block)
+        check(!refused.ok && refused.after == doubled, "two BigMac sections are refused; hosts untouched")
 
         print("State machines")
         let dupes = await MainActor.run { DuplicatesModel() }

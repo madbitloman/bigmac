@@ -62,8 +62,7 @@ struct GhostButtonStyle: PrimitiveButtonStyle {
     @Environment(\.inToolbar) private var inToolbar
 
     func makeBody(configuration: Configuration) -> some View {
-        let button = Button(role: configuration.role, action: configuration.trigger) { configuration.label }
-        if inToolbar { button.buttonStyle(.automatic) } else { button.buttonStyle(.bordered) }
+        if inToolbar { Button(configuration).buttonStyle(.automatic) } else { Button(configuration).buttonStyle(.bordered) }
     }
 }
 
@@ -72,7 +71,7 @@ struct PrimaryButtonStyle: PrimitiveButtonStyle {
     var tint: Color?
 
     func makeBody(configuration: Configuration) -> some View {
-        Button(role: configuration.role, action: configuration.trigger) { configuration.label }
+        Button(configuration)
             .buttonStyle(.borderedProminent)
             .tint(tint)
     }

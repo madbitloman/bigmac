@@ -65,7 +65,7 @@ Keys are stored in your Keychain on this Mac only, or read from `ANTHROPIC_API_K
 
 ## Ad blocking
 
-The two Safari extensions ship inside BigMac.app. Switch them on once in Safari: **Settings → Extensions**, then tick **BigMac Ad Blocker** and **BigMac YouTube Ad Skipper** (allow the second on youtube.com). BigMac's settings reach the blocker through a shared app group. Neither extension sees the pages you browse.
+The two Safari extensions ship inside BigMac.app. Switch them on once in Safari: **Settings → Extensions**, then tick **BigMac Ad Blocker** and **BigMac YouTube Ad Skipper** (allow the second on youtube.com). BigMac's settings reach the blocker through a shared app group. The content blocker only hands Safari a rule list and never sees your pages. The YouTube skipper is a script that runs on youtube.com pages only, so Safari asks you to allow it there.
 
 **System-wide** adds about 78,000 ad and tracker servers to `/etc/hosts`, behind one admin prompt. BigMac edits only its own marked section and writes only `0.0.0.0 <name>` lines. Root checks the SHA-256 of the block BigMac prepared before installing it. Turning it off removes the section and leaves the rest of the file as it was. It blocks whole servers, not page elements. Browsers using their own secure DNS, and some VPNs, bypass it.
 

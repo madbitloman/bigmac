@@ -334,12 +334,11 @@ struct RemovalSheet: View {
                     Label("macOS will ask for your password", systemImage: "lock").font(Theme.small).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
-                Button("Cancel", action: cancel).buttonStyle(.ghost).keyboardShortcut(.cancelAction)
+                Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
                 Button { confirm(selected) } label: { ActionLabel("Remove \(selected.count)") }.buttonStyle(.danger)
             }
             .padding(12)
         }
         .frame(width: 520)
-        .background(Theme.canvas)
     }
 }

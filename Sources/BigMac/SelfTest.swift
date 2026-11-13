@@ -1,4 +1,5 @@
 import Foundation
+import WebKit
 
 #if DEBUG  // Never compiled into the release app (see main.swift).
 
@@ -29,6 +30,61 @@ enum SelfTest {
         check(groups.count == 1, "one duplicate group (got \(groups.count))")
         check(groups.first?.files.count == 2, "group has 2 files after hardlink/symlink collapse (got \(groups.first?.files.map(\.lastPathComponent) ?? []))")
         check(!(groups.first?.files.contains { $0.lastPathComponent == "c.bin" } ?? true), "near-identical c.bin excluded")
+
+        print("Ad blocking")
+        let filters = URL(filePath: FileManager.default.currentDirectoryPath).appending(path: "Extensions/Filters")
+        let catalog = FilterCatalog.load(from: (try? Data(contentsOf: filters.appending(path: "manifest.json"))) ?? Data())
+        check(catalog.lists.count == 2, "filter manifest lists EasyList and EasyPrivacy (\(catalog.lists.map(\.id)))")
+        var everything = BlockerSettings(enabledCategories: Set(BlockingCategory.allCases), allowedDomains: ["example.com"])
+        let rulesFile = dir.appending(path: "blockerList.json")
+        let ruleCount = (try? RuleAssembler.write(settings: everything, catalog: catalog, fragmentsDirectory: filters, to: rulesFile)) ?? 0
+        let assembled = (try? JSONSerialization.jsonObject(with: Data(contentsOf: rulesFile))) as? [[String: Any]]
+        check(assembled?.count == ruleCount && ruleCount > 100_000 && ruleCount < 150_000,
+              "assembled Safari list parses, \(ruleCount) rules, under Safari's 150,000 limit")
+        if let json = try? String(contentsOf: rulesFile, encoding: .utf8) {
+            let store = await MainActor.run { WKContentRuleListStore(url: dir.appending(path: "webkit")) }
+            let compiled = await MainActor.run {
+                Task { try await store?.compileContentRuleList(forIdentifier: "selftest", encodedContentRuleList: json) }
+            }
+            do { _ = try await compiled.value; check(true, "WebKit compiles the full rule list") } catch {
+                check(false, "WebKit compiles the full rule list: \(error.localizedDescription)")
+            }
+        }
+        everything.enabledCategories = []
+        let emptyCount = (try? RuleAssembler.write(settings: everything, catalog: catalog, fragmentsDirectory: filters, to: rulesFile)) ?? -1
+        let emptyRules = (try? JSONSerialization.jsonObject(with: Data(contentsOf: rulesFile))) as? [Any]
+        check(emptyCount == 0 && emptyRules?.count == 1, "everything off still gives Safari a valid one-rule list")
+
+        let names = HostsBlocker.names(allowed: ["doubleclick.net"])
+        check(names.count > 70_000, "system-wide list has \(names.count) servers")
+        check(!names.contains("doubleclick.net") && !names.contains { $0.hasSuffix(".doubleclick.net") }, "allowed site and its subdomains left out")
+        let hostile = dir.appending(path: "hosts-list.txt")
+        try? "ok.example\n1.2.3.4 yourbank.com\nbad name.com\nlocalhost\n0.0.0.0\n".write(to: hostile, atomically: true, encoding: .utf8)
+        let fromHostile = HostsBlocker.names(allowed: [], listURL: hostile)
+        check(fromHostile.contains("ok.example") && !fromHostile.contains { $0.contains(" ") || $0 == "localhost" || $0 == "0.0.0.0" },
+              "upstream addresses, spaces and localhost never become entries")
+        let block = HostsBlocker.block(for: ["ads.example", "evil.example\n1.2.3.4 yourbank.com", "x.example"])
+        let blockLines = block.split(separator: "\n")
+        check(blockLines.dropFirst().dropLast().allSatisfy { $0.hasPrefix("0.0.0.0 ") } && blockLines.count == 4,
+              "a name with a newline is dropped; every entry is 0.0.0.0")
+        let base = "##\n127.0.0.1\tlocalhost\n255.255.255.255\tbroadcasthost\n10.0.0.5 nas.local\n"
+        let once = (try? HostsBlocker.splice(base, block: block)) ?? ""
+        let twice = (try? HostsBlocker.splice(once, block: block)) ?? ""
+        check(once == twice && once.hasPrefix(base), "applying the block twice gives the same file, other entries kept")
+        check((try? HostsBlocker.splice(once, block: "")) == base, "turning off restores the original file exactly")
+        let status = HostsBlocker.status(of: once)
+        check(status.installed && status.entries == 2 && status.fingerprint == HostsBlocker.fingerprint(["ads.example", "x.example"]),
+              "status reads the installed block (\(status.entries) entries)")
+        let broken = base + HostsBlocker.beginPrefix + " (000000000000)\n0.0.0.0 a.example\n"
+        check((try? HostsBlocker.splice(broken, block: block)) == nil && HostsBlocker.status(of: broken).malformed,
+              "a block with no END line is refused, not truncated")
+        let smuggled = once.replacingOccurrences(of: "0.0.0.0 x.example", with: "0.0.0.0 x.example\n6.6.6.6 yourbank.com")
+        check(!HostsBlocker.managedLines(smuggled).contains("6.6.6.6 yourbank.com"),
+              "a redirect hidden inside BigMac's block is still reported by the audit")
+        let awkInput = dir.appending(path: "hosts-awk")
+        try? (once + "# after\n").write(to: awkInput, atomically: true, encoding: .utf8)
+        let awkOut = Shell.run("/usr/bin/awk", [HostsBlocker.awkProgram, awkInput.path])
+        check(awkOut == (try? HostsBlocker.splice(once + "# after\n", block: "")), "root's awk removes exactly what splice removes")
 
         print("State machines")
         let dupes = await MainActor.run { DuplicatesModel() }

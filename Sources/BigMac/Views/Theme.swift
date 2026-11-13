@@ -1,30 +1,29 @@
 import AppKit
 import SwiftUI
 
-/// Linear-style tokens: near-black surfaces, hairline borders, one indigo accent, muted status colours.
+/// System colours and type, so BigMac follows the Mac's appearance, accent colour and contrast settings
+/// the way Apple's own apps do. Sizes stay at or above the earlier custom ones.
 enum Theme {
-    static let canvas = Color(light: 0xFCFCFD, dark: 0x101113)
-    static let sidebar = Color(light: 0xF4F4F6, dark: 0x0B0B0D)
-    static let raised = Color(light: 0xFFFFFF, dark: 0x17181B)
-    static let hover = Color(light: 0x000000, dark: 0xFFFFFF, alpha: 0.045)
-    static let selected = Color(light: 0x000000, dark: 0xFFFFFF, alpha: 0.075)
-    static let border = Color(light: 0x000000, dark: 0xFFFFFF, alpha: 0.08)
-    static let text = Color(light: 0x16171A, dark: 0xE8E9EC)
-    static let secondary = Color(light: 0x6B6F76, dark: 0x8A8F98)
-    static let tertiary = Color(light: 0x9EA2A9, dark: 0x5A5E66)
-    static let accent = Color(light: 0x5E6AD2, dark: 0x6E79D6)
+    static let canvas = Color(nsColor: .controlBackgroundColor)
+    static let raised = Color(nsColor: .windowBackgroundColor)
+    static let selected = Color.accentColor.opacity(0.12)
+    static let border = Color(nsColor: .separatorColor)
+    static let text = Color(nsColor: .labelColor)
+    static let secondary = Color(nsColor: .secondaryLabelColor)
+    static let tertiary = Color(nsColor: .tertiaryLabelColor)
+    static let accent = Color.accentColor
 
-    static let red = Color(light: 0xD9443F, dark: 0xEB5757)
-    static let orange = Color(light: 0xD9822B, dark: 0xF2994A)
-    static let yellow = Color(light: 0xB8930E, dark: 0xE2B93B)
-    static let green = Color(light: 0x2F9E6A, dark: 0x4CB782)
-    static let blue = Color(light: 0x3B82C4, dark: 0x5E9FE0)
+    static let red = Color(nsColor: .systemRed)
+    static let orange = Color(nsColor: .systemOrange)
+    static let yellow = Color(nsColor: .systemYellow)
+    static let green = Color(nsColor: .systemGreen)
+    static let blue = Color(nsColor: .systemBlue)
 
-    static let body = Font.system(size: 13)
-    static let small = Font.system(size: 11.5)
-    static let label = Font.system(size: 11, weight: .medium)
-    static let mono = Font.system(size: 11.5, design: .monospaced)
-    static let title = Font.system(size: 14, weight: .semibold)
+    static let body = Font.body
+    static let small = Font.callout
+    static let label = Font.subheadline.weight(.medium)
+    static let mono = Font.system(.callout, design: .monospaced)
+    static let title = Font.title3.weight(.semibold)
 
     static func risk(_ level: RiskLevel) -> Color {
         switch level {
@@ -37,6 +36,7 @@ enum Theme {
 }
 
 extension Color {
+    /// A fixed light/dark pair, for chart colours that have no system equivalent.
     init(light: UInt32, dark: UInt32, alpha: Double = 1) {
         func ns(_ hex: UInt32) -> NSColor {
             NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
@@ -46,46 +46,45 @@ extension Color {
     }
 }
 
+private struct InToolbarKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// Set on pane actions placed in the window toolbar, where buttons take the toolbar's own look.
+    var inToolbar: Bool {
+        get { self[InToolbarKey.self] }
+        set { self[InToolbarKey.self] = newValue }
+    }
+}
+
 // MARK: Buttons
 
-struct GhostButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var enabled
-    @State private var hovering = false
+/// Secondary action: a standard bordered push button, or a plain toolbar item in the toolbar.
+struct GhostButtonStyle: PrimitiveButtonStyle {
+    @Environment(\.inToolbar) private var inToolbar
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Theme.body)
-            .foregroundStyle(enabled ? Theme.text : Theme.tertiary)
-            .padding(.horizontal, 9).frame(height: 26)
-            .background(configuration.isPressed ? Theme.selected : hovering && enabled ? Theme.hover : .clear,
-                        in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
-            .contentShape(Rectangle())
-            .onHover { hovering = $0 }
+        let button = Button(role: configuration.role, action: configuration.trigger) { configuration.label }
+        if inToolbar { button.buttonStyle(.automatic) } else { button.buttonStyle(.bordered) }
     }
 }
 
-struct PrimaryButtonStyle: ButtonStyle {
-    var tint = Theme.accent
-    @Environment(\.isEnabled) private var enabled
+/// The pane's main action: the accent-coloured default button.
+struct PrimaryButtonStyle: PrimitiveButtonStyle {
+    var tint: Color?
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.white.opacity(enabled ? 1 : 0.5))
-            .padding(.horizontal, 11).frame(height: 26)
-            .background(tint.opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.35), in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
+        Button(role: configuration.role, action: configuration.trigger) { configuration.label }
+            .buttonStyle(.borderedProminent)
+            .tint(tint)
     }
 }
 
-extension ButtonStyle where Self == GhostButtonStyle { static var ghost: GhostButtonStyle { .init() } }
-extension ButtonStyle where Self == PrimaryButtonStyle {
+extension PrimitiveButtonStyle where Self == GhostButtonStyle { static var ghost: GhostButtonStyle { .init() } }
+extension PrimitiveButtonStyle where Self == PrimaryButtonStyle {
     static var primary: PrimaryButtonStyle { .init() }
     static var danger: PrimaryButtonStyle { .init(tint: Theme.red) }
 }
 
-/// Button label with an optional trailing key hint, e.g. "Scan  ⌘R".
+/// Button label: title with an optional SF Symbol. `key` is shown as a tooltip, the way macOS shows shortcuts.
 struct ActionLabel: View {
     let title: String
     var symbol: String?
@@ -98,17 +97,16 @@ struct ActionLabel: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            if let symbol { Image(systemName: symbol).font(.system(size: 11, weight: .medium)) }
-            Text(title)
-            if let key { Text(key).font(.system(size: 11)).opacity(0.55) }
+        Group {
+            if let symbol { Label(title, systemImage: symbol) } else { Text(title) }
         }
+        .help(key.map { "\(title) (\($0))" } ?? "")
     }
 }
 
 // MARK: Small parts
 
-/// Status pill with a coloured dot, Linear-issue style.
+/// Status tag: a tinted capsule with an optional dot, like the tags in Mail and Reminders.
 struct Pill: View {
     let text: String
     var tint: Color = Theme.secondary
@@ -116,84 +114,58 @@ struct Pill: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            if dot { Circle().fill(tint).frame(width: 6, height: 6) }
-            Text(text).font(Theme.label).foregroundStyle(dot ? Theme.secondary : tint)
+            if dot { Circle().fill(tint).frame(width: 7, height: 7) }
+            Text(text).font(Theme.label).foregroundStyle(dot ? Theme.text : tint)
         }
-        .padding(.horizontal, 7).frame(height: 20)
-        .overlay(Capsule().strokeBorder(Theme.border))
+        .padding(.horizontal, 8).frame(height: 21)
+        .background(tint.opacity(0.14), in: Capsule())
         .fixedSize()
     }
 }
 
+/// A standard macOS checkbox without a title.
 struct CheckBox: View {
     @Binding var isOn: Bool
     var disabled = false
 
     var body: some View {
-        Button { isOn.toggle() } label: {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(isOn ? Theme.accent : .clear)
-                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(isOn ? Theme.accent : Theme.tertiary, lineWidth: 1))
-                .overlay { if isOn { Image(systemName: "checkmark").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.white) } }
-                .frame(width: 14, height: 14)
-                .opacity(disabled ? 0.35 : 1)
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
+        Toggle("", isOn: $isOn).toggleStyle(.checkbox).labelsHidden().disabled(disabled)
     }
 }
 
-/// Segmented-looking toggle chip for filters.
+/// On/off filter, drawn as a native toggle button.
 struct FilterChip: View {
     let title: String
     @Binding var isOn: Bool
 
     var body: some View {
-        Button { isOn.toggle() } label: {
-            HStack(spacing: 5) {
-                Image(systemName: isOn ? "checkmark" : "line.3.horizontal.decrease").font(.system(size: 9.5, weight: .semibold))
-                Text(title)
-            }
-            .font(Theme.small)
-            .foregroundStyle(isOn ? Theme.text : Theme.secondary)
-            .padding(.horizontal, 8).frame(height: 24)
-            .background(isOn ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
-        }
-        .buttonStyle(.plain)
+        Toggle(title, isOn: $isOn).toggleStyle(.button)
     }
 }
 
-/// Clickable count in a summary strip; the selected ones filter the list below.
+/// Clickable count in the filter bar; the selected ones filter the list below.
 struct StatToggle: View {
     let label: String
     let count: Int
     let tint: Color
     let isOn: Bool
     let action: () -> Void
-    @State private var hovering = false
 
     var body: some View {
-        Button(action: action) {
+        Toggle(isOn: Binding(get: { isOn }, set: { _ in action() })) {
             HStack(spacing: 6) {
-                Circle().fill(count > 0 ? tint : Theme.tertiary.opacity(0.5)).frame(width: 6, height: 6)
-                Text("\(count)").font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(count > 0 ? Theme.text : Theme.tertiary)
-                Text(label).font(Theme.small).foregroundStyle(isOn ? Theme.text : Theme.secondary)
+                Circle().fill(count > 0 ? tint : Theme.tertiary).frame(width: 7, height: 7)
+                Text("\(count)").fontWeight(.semibold).monospacedDigit()
+                Text(label)
             }
-            .padding(.horizontal, 8).frame(height: 24)
-            .background(isOn ? Theme.selected : hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(isOn ? tint.opacity(0.55) : .clear))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .toggleStyle(.button)
         .disabled(count == 0 && !isOn)
-        .onHover { hovering = $0 }
         .fixedSize()
     }
 }
 
-/// Strip of StatToggles with a Clear link, shared by Security and Network.
+/// Filter bar under the toolbar (like Finder's search scope bar), shared by Security and Network.
 struct FilterStrip<Content: View>: View {
     let active: Bool
     let trailing: String
@@ -201,74 +173,38 @@ struct FilterStrip<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             content
-            if active {
-                Button("Clear", action: clear).buttonStyle(.plain).font(Theme.small).foregroundStyle(Theme.accent).padding(.leading, 6)
-            }
+            if active { Button("Clear", action: clear).buttonStyle(.link).padding(.leading, 4) }
             Spacer(minLength: 8)
-            Text(trailing).font(Theme.small).foregroundStyle(Theme.tertiary).lineLimit(1)
+            Text(trailing).font(Theme.small).foregroundStyle(Theme.secondary).lineLimit(1)
         }
-        .padding(.horizontal, 12).frame(height: 40)
+        .padding(.horizontal, 14).frame(height: 44)
+        .background(.bar)
     }
 }
 
 struct StripDivider: View {
-    var body: some View { Rectangle().fill(Theme.border).frame(width: 1, height: 14).padding(.horizontal, 6) }
+    var body: some View { Divider().frame(height: 16).padding(.horizontal, 4) }
 }
 
 struct Hairline: View {
-    var body: some View { Rectangle().fill(Theme.border).frame(height: 1) }
-}
-
-/// Indeterminate 1px progress line under the top bar.
-struct ProgressLine: View {
-    let active: Bool
-    @State private var phase: CGFloat = -0.3
-
-    var body: some View {
-        GeometryReader { geo in
-            Rectangle().fill(
-                LinearGradient(colors: [.clear, Theme.accent, .clear], startPoint: .leading, endPoint: .trailing)
-            )
-            .frame(width: geo.size.width * 0.3)
-            .offset(x: geo.size.width * phase)
-            .opacity(active ? 1 : 0)
-        }
-        .frame(height: 1)
-        .clipped()
-        .onAppear {
-            withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) { phase = 1 }
-        }
-    }
+    var body: some View { Divider() }
 }
 
 // MARK: Layout
 
-private struct SnapshotModeKey: EnvironmentKey { static let defaultValue = false }
-extension EnvironmentValues {
-    /// ImageRenderer can't draw scroll views, so headless snapshots lay lists out flat.
-    var snapshotMode: Bool {
-        get { self[SnapshotModeKey.self] }
-        set { self[SnapshotModeKey.self] = newValue }
-    }
-}
-
 /// Scrolling list body with pinned section headers.
 struct Scroller<Content: View>: View {
     @ViewBuilder var content: Content
-    @Environment(\.snapshotMode) private var snapshot
 
     var body: some View {
-        if snapshot {
-            Color.clear.overlay(alignment: .top) { VStack(spacing: 0) { content }.fixedSize(horizontal: false, vertical: true) }.clipped()
-        } else {
-            ScrollView { LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) { content } }
-        }
+        ScrollView { LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) { content } }
     }
 }
 
-/// Pane chrome: 52pt top bar (title · status · actions), progress line, optional callout, content.
+/// Pane chrome: the window title and subtitle come from the pane, its actions go in the window toolbar,
+/// and a small spinner shows while it works.
 struct PaneView<Actions: View, Content: View>: View {
     let title: String
     let status: String
@@ -277,27 +213,21 @@ struct PaneView<Actions: View, Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Text(title).font(Theme.title).foregroundStyle(Theme.text).fixedSize()
-                // The status gives way first so buttons never truncate; full text on hover.
-                Text(status).font(Theme.small).foregroundStyle(Theme.secondary).lineLimit(1).truncationMode(.tail)
-                    .layoutPriority(-1).help(status)
-                Spacer(minLength: 12)
-                HStack(spacing: 6) { actions }.fixedSize()
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.canvas)
+            .navigationTitle(title)
+            .navigationSubtitle(status)
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if busy { ProgressView().controlSize(.small) }
+                    actions.environment(\.inToolbar, true).labelStyle(.titleAndIcon)
+                }
             }
-            .padding(.horizontal, 18).frame(height: 52)
-            ZStack(alignment: .top) {
-                Hairline()
-                ProgressLine(active: busy)
-            }
-            content.frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(Theme.canvas)
     }
 }
 
-/// Grouped list section: small caps header with trailing info, hairline-separated rows.
+/// Grouped list section: a pinned header on the bar material, then the rows.
 struct ListGroup<Header: View, Rows: View>: View {
     @ViewBuilder var header: Header
     @ViewBuilder var rows: Rows
@@ -306,34 +236,34 @@ struct ListGroup<Header: View, Rows: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) { header }
                 .font(Theme.label).foregroundStyle(Theme.secondary)
-                .padding(.horizontal, 18).frame(height: 32)
-                .background(Theme.canvas)
+                .padding(.horizontal, 18).frame(height: 34)
+                .background(.bar)
+                .overlay(alignment: .bottom) { Divider() }
             rows
         }
     }
 }
 
-/// One list row: hover highlight and a hairline below.
+/// One list row with an inset separator below, like a plain macOS table.
 struct Row<Content: View>: View {
     var selected = false
     @ViewBuilder var content: Content
-    @State private var hovering = false
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) { content }
                 .font(Theme.body).foregroundStyle(Theme.text)
-                .padding(.horizontal, 18).padding(.vertical, 7)
-                .frame(minHeight: 36)
+                .padding(.horizontal, 18).padding(.vertical, 8)
+                .frame(minHeight: 38)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(selected ? Theme.selected : hovering ? Theme.hover : .clear)
+                .background(selected ? Theme.selected : .clear)
                 .contentShape(Rectangle())
-                .onHover { hovering = $0 }
-            Rectangle().fill(Theme.border).frame(height: 1).padding(.leading, 18).opacity(0.6)
+            Divider().padding(.leading, 18)
         }
     }
 }
 
+/// The system's empty-state view.
 struct EmptyState<Action: View>: View {
     let symbol: String
     let title: String
@@ -341,13 +271,12 @@ struct EmptyState<Action: View>: View {
     @ViewBuilder var action: Action
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 26, weight: .light)).foregroundStyle(Theme.tertiary)
-                .frame(width: 56, height: 56)
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
-            Text(title).font(Theme.title).foregroundStyle(Theme.text).padding(.top, 4)
-            Text(message).font(Theme.small).foregroundStyle(Theme.secondary).multilineTextAlignment(.center).frame(maxWidth: 340)
-            action.padding(.top, 6)
+        ContentUnavailableView {
+            Label(title, systemImage: symbol)
+        } description: {
+            Text(message).frame(maxWidth: 420)
+        } actions: {
+            action.controlSize(.large)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -369,14 +298,14 @@ struct Callout: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 12)).foregroundStyle(tint)
-            Text(text).font(Theme.small).foregroundStyle(Theme.secondary).textSelection(.enabled)
+            Image(systemName: symbol).foregroundStyle(tint)
+            Text(text).font(Theme.small).foregroundStyle(Theme.text).textSelection(.enabled)
             Spacer()
             if let actionTitle, let action { Button(actionTitle, action: action).buttonStyle(.ghost) }
         }
-        .padding(.horizontal, 18).padding(.vertical, 8)
-        .background(tint.opacity(0.06))
-        .overlay(alignment: .bottom) { Hairline() }
+        .padding(.horizontal, 18).padding(.vertical, 9)
+        .background(tint.opacity(0.1))
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 
@@ -395,4 +324,11 @@ extension View {
 
 func revealInFinder(_ url: URL) {
     NSWorkspace.shared.activateFileViewerSelecting([url])
+}
+
+extension View {
+    /// Explanatory text under a grouped form section, aligned with the rows above it.
+    func formFooter(_ color: Color = Theme.secondary) -> some View {
+        foregroundStyle(color).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 8)
+    }
 }

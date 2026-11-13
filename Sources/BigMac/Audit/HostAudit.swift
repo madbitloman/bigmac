@@ -408,8 +408,10 @@ enum HostAudit {
         }
         if let hosts = try? String(contentsOfFile: "/etc/hosts", encoding: .utf8) {
             let defaults = ["localhost", "broadcasthost"]
+            // BigMac's own ad-blocking entries are left out; anything else placed between its markers still counts.
+            let managed = HostsBlocker.managedLines(hosts)
             let custom = hosts.split(separator: "\n").map { $0.trimmed }
-                .filter { !$0.isEmpty && !$0.hasPrefix("#") && !defaults.contains(where: $0.hasSuffix) }
+                .filter { !$0.isEmpty && !$0.hasPrefix("#") && !defaults.contains(where: $0.hasSuffix) && !managed.contains($0) }
             if !custom.isEmpty {
                 let redirects = custom.filter { line in !["127.", "0.0.0.0", "::1", "::"].contains(where: line.hasPrefix) }
                 out.append(AuditItem(id: "interception:hosts", kind: .interception, title: "/etc/hosts has \(custom.count) custom entries",

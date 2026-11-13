@@ -3,8 +3,12 @@ import AppKit
 #if DEBUG
 // Developer self-test: debug builds only, so the shipped app has no command-line path that reads saved keys.
 if CommandLine.arguments.contains("--selftest") {
+    // An AppKit run loop rather than dispatchMain: WebKit (used to compile the Safari rules) won't start without one.
+    let app = NSApplication.shared
+    app.setActivationPolicy(.prohibited)
+    setvbuf(stdout, nil, _IOLBF, 0)  // progress shows up in a log file as it happens
     Task.detached { await SelfTest.run(arguments: CommandLine.arguments) }
-    dispatchMain()
+    app.run()
 }
 #endif
 
@@ -18,9 +22,10 @@ if let i = CommandLine.arguments.firstIndex(of: "--icon"), CommandLine.arguments
 }
 
 if CommandLine.arguments.contains("--snapshot") {
-    // Some scanners need a live AppKit run loop, which dispatchMain doesn't provide.
+    // Some scanners need a live AppKit run loop, which dispatchMain doesn't provide. Accessory (no Dock icon)
+    // rather than prohibited, so the offscreen windows the snapshots draw into can be ordered in.
     let app = NSApplication.shared
-    app.setActivationPolicy(.prohibited)
+    app.setActivationPolicy(.accessory)
     Task { @MainActor in await Snapshot.run(arguments: CommandLine.arguments) }
     app.run()
 }

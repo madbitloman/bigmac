@@ -74,7 +74,7 @@ struct AppsView: View {
                 Text("Everything goes to the Trash and can be restored.").font(Theme.small).foregroundStyle(Theme.secondary)
                 HStack {
                     Spacer()
-                    Button { pending = nil } label: { ActionLabel("Cancel") }.buttonStyle(.ghost).keyboardShortcut(.cancelAction)
+                    Button("Cancel") { pending = nil }.keyboardShortcut(.cancelAction)
                     Button {
                         let target = app
                         pending = nil
@@ -85,7 +85,6 @@ struct AppsView: View {
             }
             .padding(20)
             .frame(width: 480)
-            .background(Theme.raised)
         }
     }
 

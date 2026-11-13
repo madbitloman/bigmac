@@ -4,9 +4,9 @@ enum Pane: String, CaseIterable, Identifiable {
     case clean = "Clean"
     case duplicates = "Duplicates"
     case apps = "Apps"
+    case adBlock = "Ad Blocking"
     case network = "Network"
     case audit = "Security"
-    case settings = "Settings"
 
     var id: String { rawValue }
     var symbol: String {
@@ -14,116 +14,113 @@ enum Pane: String, CaseIterable, Identifiable {
         case .clean: "sparkles"
         case .duplicates: "square.on.square"
         case .apps: "square.grid.2x2"
+        case .adBlock: "hand.raised"
         case .network: "point.3.connected.trianglepath.dotted"
         case .audit: "shield.lefthalf.filled"
-        case .settings: "gearshape"
         }
     }
     var key: KeyEquivalent { KeyEquivalent(Character("\((Pane.allCases.firstIndex(of: self) ?? 0) + 1)")) }
+
+    static let cleanup: [Pane] = [.clean, .duplicates, .apps]
+    static let protection: [Pane] = [.adBlock, .network, .audit]
+}
+
+struct PaneFocusKey: FocusedValueKey { typealias Value = Binding<Pane?> }
+extension FocusedValues {
+    var pane: Binding<Pane?>? {
+        get { self[PaneFocusKey.self] }
+        set { self[PaneFocusKey.self] = newValue }
+    }
+}
+
+/// Go menu: ⌘1…⌘6 switch panes, as in Finder's sidebar shortcuts.
+struct PaneCommands: Commands {
+    @FocusedValue(\.pane) private var pane
+
+    var body: some Commands {
+        CommandMenu("Go") {
+            ForEach(Pane.allCases) { p in
+                Button(p.rawValue) { pane?.wrappedValue = p }
+                    .keyboardShortcut(p.key, modifiers: .command)
+                    .disabled(pane == nil)
+            }
+        }
+    }
 }
 
 struct ContentView: View {
-    @State private var pane: Pane
+    @State private var pane: Pane?
 
     init(initial: Pane = .clean) { _pane = State(initialValue: initial) }
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView {
             Sidebar(pane: $pane)
-            Rectangle().fill(Theme.border).frame(width: 1)
-            switch pane {
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+        } detail: {
+            switch pane ?? .clean {
             case .clean: CleanView()
             case .duplicates: DuplicatesView()
             case .apps: AppsView()
+            case .adBlock: AdBlockView()
             case .network: NetworkView()
             case .audit: AuditView()
-            case .settings: JevSettingsView()
             }
         }
-        .background(Theme.canvas)
-        .ignoresSafeArea()
-        .tint(Theme.accent)
+        .focusedSceneValue(\.pane, $pane)
     }
 }
 
 private struct Sidebar: View {
-    @Binding var pane: Pane
+    @Binding var pane: Pane?
     @Environment(JunkModel.self) private var junk
     @Environment(DuplicatesModel.self) private var duplicates
     @Environment(AppsModel.self) private var apps
     @Environment(NetworkModel.self) private var network
     @Environment(AuditModel.self) private var audit
+    @Environment(AdBlockModel.self) private var adBlock
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
-                LogoBadge(size: 20)
-                Text("BigMac").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.text)
-            }
-            .padding(.horizontal, 10).padding(.top, 44).padding(.bottom, 14)
-
-            ForEach(Pane.allCases.filter { $0 != .settings }) { item($0) }
-            Spacer()
-            item(.settings)
-            Text("v0.1 · runs locally, on demand").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
-                .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 12)
+        List(selection: $pane) {
+            Section("Cleanup") { ForEach(Pane.cleanup) { item($0) } }
+            Section("Protection") { ForEach(Pane.protection) { item($0) } }
         }
-        .padding(.horizontal, 8)
-        .frame(width: 216)
-        .background(Theme.sidebar)
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            HStack(spacing: 8) {
+                LogoBadge(size: 18)
+                Text("Runs locally, on demand").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+        }
     }
 
     private func item(_ p: Pane) -> some View {
-        SidebarItem(pane: p, selected: pane == p, trailing: trailing(p)) { pane = p }
-            .keyboardShortcut(p.key, modifiers: .command)
+        Label(p.rawValue, systemImage: p.symbol)
+            .font(.body)
+            .badge(badge(p))
+            .tag(p)
     }
 
-    /// Live counters, like Linear's issue counts.
-    private func trailing(_ p: Pane) -> (String, Color)? {
+    /// Live counters, shown as sidebar badges like Mail's unread counts.
+    private func badge(_ p: Pane) -> Text? {
         switch p {
         case .clean where !junk.results.isEmpty:
-            return (junk.allItems.reduce(0) { $0 + $1.size }.bytes, Theme.tertiary)
+            return Text(junk.allItems.reduce(0) { $0 + $1.size }.bytes)
         case .duplicates where !duplicates.groups.isEmpty:
-            return (duplicates.wasted.bytes, Theme.tertiary)
+            return Text(duplicates.wasted.bytes)
         case .apps where !apps.apps.isEmpty:
-            return ("\(apps.apps.filter { $0.isUnused(days: apps.unusedDays) }.count) unused", Theme.tertiary)
+            return Text("\(apps.apps.filter { $0.isUnused(days: apps.unusedDays) }.count) unused")
+        case .adBlock where adBlock.blockerEnabled == true || adBlock.hosts.installed:
+            return Text("on").foregroundStyle(Theme.green)
         case .network where network.running:
-            return ("live", Theme.green)
+            return Text("live").foregroundStyle(Theme.green)
         case .audit where !audit.report.observations.isEmpty:
             let high = audit.report.observations.filter { audit.severity($0) == .high }.count
-            return high > 0 ? ("\(high) high", Theme.red) : ("clear", Theme.green)
+            return high > 0 ? Text("\(high) high").foregroundStyle(Theme.red) : Text("clear").foregroundStyle(Theme.green)
         default:
             return nil
         }
-    }
-}
-
-private struct SidebarItem: View {
-    let pane: Pane
-    let selected: Bool
-    let trailing: (String, Color)?
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 9) {
-                Image(systemName: pane.symbol).font(.system(size: 12.5)).frame(width: 16)
-                    .foregroundStyle(selected ? Theme.text : Theme.secondary)
-                Text(pane.rawValue).font(.system(size: 13, weight: selected ? .medium : .regular))
-                    .foregroundStyle(selected ? Theme.text : Theme.secondary)
-                Spacer()
-                if let (text, tint) = trailing {
-                    Text(text).font(.system(size: 11)).monospacedDigit().foregroundStyle(tint)
-                } else if hovering {
-                    Text("⌘\(String(pane.key.character))").font(.system(size: 11)).foregroundStyle(Theme.tertiary)
-                }
-            }
-            .padding(.horizontal, 10).frame(height: 28)
-            .background(selected ? Theme.selected : hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }

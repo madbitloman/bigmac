@@ -13,7 +13,7 @@ enum Snapshot {
 
         let jev = JevSettings(useKeychain: false),  // a Keychain prompt would block headless runs
              junk = JunkModel(), duplicates = DuplicatesModel(), apps = AppsModel()
-        let network = NetworkModel(), audit = AuditModel(), stats = SystemStats()
+        let network = NetworkModel(), audit = AuditModel(), stats = SystemStats(), adBlock = AdBlockModel()
         audit.triageAfterScan = false
         if arguments.contains("demo") {
             Demo.fill(junk: junk, duplicates: duplicates, apps: apps, network: network, audit: audit)
@@ -22,7 +22,8 @@ enum Snapshot {
             async let j: Void = junk.scan()
             async let n: Void = network.refresh()
             async let p: Void = apps.scan()
-            _ = await (a, j, n, p)
+            async let b: Void = adBlock.refresh()
+            _ = await (a, j, n, p, b)
         }
         if arguments.contains("demo") {
             stats.fillDemo()
@@ -32,22 +33,43 @@ enum Snapshot {
         }
         print("data ready")
 
-        func render<V: View>(_ name: String, _ view: V, width: CGFloat = 1180, height: CGFloat? = 760) {
-            let root = view
+        func environment<V: View>(_ view: V) -> some View {
+            view
                 .environment(jev).environment(junk).environment(duplicates).environment(apps)
-                .environment(network).environment(audit).environment(stats)
+                .environment(network).environment(audit).environment(stats).environment(adBlock)
                 .environment(\.colorScheme, dark ? .dark : .light)
-                .environment(\.snapshotMode, true)
-                .frame(width: width, height: height)
-            let renderer = ImageRenderer(content: root)
-            renderer.scale = 2
-            guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
-                  let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { print("render failed: \(name)"); return }
+        }
+        func write(_ rep: NSBitmapImageRep?, _ name: String) {
+            guard let png = rep?.representation(using: .png, properties: [:]) else { print("render failed: \(name)"); return }
             try? png.write(to: dir.appending(path: "\(name).png"))
             print("wrote \(name).png")
         }
-        for pane in Pane.allCases { render(pane.rawValue.replacingOccurrences(of: " ", with: "-"), ContentView(initial: pane)) }
-        render("menubar", MenuBarPanel(), width: 400, height: nil)  // natural height
+        /// Native lists, the sidebar and the toolbar only draw in a real window, so each pane goes into an
+        /// offscreen one (with its toolbar bridged from SwiftUI) and the whole window frame is cached to a bitmap.
+        /// `height: nil` sizes the window to fit, borderless, the way the menu bar panel appears.
+        func window<V: View>(_ name: String, _ view: V, width: CGFloat = 1180, height: CGFloat? = 760) async {
+            let host = NSHostingController(rootView: environment(view))
+            host.sceneBridgingOptions = [.toolbars, .title]
+            let height = height ?? host.sizeThatFits(in: NSSize(width: width, height: 10_000)).height
+            let style: NSWindow.StyleMask = name == "menubar" ? [.borderless] : [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            let window = NSWindow(contentRect: NSRect(x: -20_000, y: 0, width: width, height: height),
+                                  styleMask: style, backing: .buffered, defer: false)
+            window.toolbarStyle = .unified
+            window.contentViewController = host
+            window.setContentSize(NSSize(width: width, height: height))
+            window.setFrameOrigin(NSPoint(x: -20_000, y: 0))
+            window.orderFrontRegardless()
+            try? await Task.sleep(for: .milliseconds(900))  // let SwiftUI lay out, load icons and fill the toolbar
+            guard let frame = window.contentView?.superview else { return }
+            frame.layoutSubtreeIfNeeded()
+            let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds)
+            if let rep { frame.cacheDisplay(in: frame.bounds, to: rep) }
+            write(rep, name)
+            window.orderOut(nil)
+        }
+        for pane in Pane.allCases { await window(pane.rawValue.replacingOccurrences(of: " ", with: "-"), ContentView(initial: pane)) }
+        await window("settings", SettingsView(), width: 620, height: 520)
+        await window("menubar", MenuBarPanel().frame(width: 400), width: 400, height: nil)
         exit(0)
     }
 }

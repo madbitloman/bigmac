@@ -11,6 +11,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("Security"),
                 .linkedFramework("CoreServices"),
+                .linkedFramework("SafariServices"),
             ]
         )
     ]

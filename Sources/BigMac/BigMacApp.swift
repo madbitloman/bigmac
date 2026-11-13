@@ -6,11 +6,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Needed when launched as a bare SwiftPM binary so the window comes to the front.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { note in
-            // Hidden title bar: let the whole background drag the window.
-            let window = note.object as? NSWindow
-            MainActor.assumeIsolated { window?.isMovableByWindowBackground = true }
-        }
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { note in
             // With the menu bar item on, closing the window drops the Dock icon and keeps the process in the menu bar.
             let closing = note.object as? NSWindow
@@ -38,15 +33,24 @@ struct BigMacApp: App {
     @State private var network = NetworkModel()
     @State private var audit = AuditModel()
     @State private var stats = SystemStats()
+    @State private var adBlock = AdBlockModel()
 
     var body: some Scene {
         Window("BigMac", id: "main") {
             models(ContentView())
                 .frame(minWidth: 980, minHeight: 620)
         }
-        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1180, height: 760)
+        .commands {
+            SidebarCommands()
+            PaneCommands()
+        }
+
+        Settings {
+            models(SettingsView())
+        }
 
         MenuBarExtra(isInserted: $showMenuBar) {
             models(MenuBarPanel())
@@ -65,5 +69,6 @@ struct BigMacApp: App {
             .environment(network)
             .environment(audit)
             .environment(stats)
+            .environment(adBlock)
     }
 }

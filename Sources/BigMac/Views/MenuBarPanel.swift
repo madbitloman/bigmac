@@ -21,7 +21,6 @@ struct MenuBarPanel: View {
         }
         .padding(12)
         .frame(width: 400)
-        .background(Theme.canvas)
         .onAppear { stats.start() }
         .onDisappear { stats.stop() }
     }
@@ -230,8 +229,8 @@ private struct Card<Content: View>: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
+        // Translucent tiles over the menu bar window's own material, like Control Center.
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 

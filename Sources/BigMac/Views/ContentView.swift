@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum Pane: String, CaseIterable, Identifiable {
+    case overview = "Overview"
     case clean = "Clean"
     case duplicates = "Duplicates"
     case apps = "Apps"
@@ -11,6 +12,7 @@ enum Pane: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var symbol: String {
         switch self {
+        case .overview: "gauge.with.dots.needle.33percent"
         case .clean: "sparkles"
         case .duplicates: "square.on.square"
         case .apps: "square.grid.2x2"
@@ -33,7 +35,7 @@ extension FocusedValues {
     }
 }
 
-/// Go menu: ⌘1…⌘6 switch panes, as in Finder's sidebar shortcuts.
+/// Go menu: ⌘1…⌘7 switch panes, as in Finder's sidebar shortcuts.
 struct PaneCommands: Commands {
     @FocusedValue(\.pane) private var pane
 
@@ -51,14 +53,15 @@ struct PaneCommands: Commands {
 struct ContentView: View {
     @State private var pane: Pane?
 
-    init(initial: Pane = .clean) { _pane = State(initialValue: initial) }
+    init(initial: Pane = .overview) { _pane = State(initialValue: initial) }
 
     var body: some View {
         NavigationSplitView {
             Sidebar(pane: $pane)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
         } detail: {
-            switch pane ?? .clean {
+            switch pane ?? .overview {
+            case .overview: OverviewView { pane = $0 }
             case .clean: CleanView()
             case .duplicates: DuplicatesView()
             case .apps: AppsView()
@@ -82,15 +85,19 @@ private struct Sidebar: View {
 
     var body: some View {
         List(selection: $pane) {
+            item(.overview)
             Section("Cleanup") { ForEach(Pane.cleanup) { item($0) } }
             Section("Protection") { ForEach(Pane.protection) { item($0) } }
         }
         .listStyle(.sidebar)
+        .toolbar(removing: .sidebarToggle)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
                 LogoBadge(size: 18)
                 Text("Runs locally, on demand").font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                SettingsLink { Image(systemName: "gearshape").font(.system(size: 16)) }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).help("Settings (⌘,)")
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
         }

@@ -1,8 +1,9 @@
 import Darwin
 import Foundation
 import Observation
+import SystemConfiguration
 
-/// CPU, memory and disk readings for the menu bar panel. Samples only while the panel is open.
+/// CPU, memory and disk readings for the menu bar panel and the Overview pane. Samples only while one of them is on screen.
 @MainActor @Observable
 final class SystemStats {
     struct Memory: Equatable {
@@ -29,14 +30,19 @@ final class SystemStats {
     private(set) var model = SystemStats.sysctl("hw.model") ?? "Mac"
     private(set) var chip = SystemStats.sysctl("machdep.cpu.brand_string") ?? ""
     private(set) var cores = ProcessInfo.processInfo.activeProcessorCount
+    /// The name in System Settings > General > Sharing. Read from SystemConfiguration, which never waits on DNS.
+    private(set) var computerName = SCDynamicStoreCopyComputerName(nil, nil) as String? ?? "This Mac"
     private var demoUptime: TimeInterval?
     var uptime: TimeInterval { demoUptime ?? ProcessInfo.processInfo.systemUptime }
 
     static let historyLength = 40
     private var lastTicks: (user: UInt64, system: UInt64, idle: UInt64)?
     private var timer: Task<Void, Never>?
+    /// How many views are showing readings; sampling stops when the last one goes away.
+    private var watchers = 0
 
     func start() {
+        watchers += 1
         guard timer == nil else { return }
         sample()
         timer = Task { [weak self] in
@@ -50,6 +56,8 @@ final class SystemStats {
     }
 
     func stop() {
+        watchers = max(0, watchers - 1)
+        guard watchers == 0 else { return }
         timer?.cancel()
         timer = nil
     }
@@ -78,7 +86,7 @@ final class SystemStats {
     /// Made-up readings for `--snapshot <dir> demo`, so shared screenshots don't describe the Mac they were taken on.
     func fillDemo() {
         let gb: UInt64 = 1 << 30
-        model = "Mac15,3"; chip = "Apple M3 Pro"; cores = 12; demoUptime = 3 * 86_400 + 5 * 3_600
+        computerName = "Demo MacBook Pro"; model = "Mac15,3"; chip = "Apple M3 Pro"; cores = 12; demoUptime = 3 * 86_400 + 5 * 3_600
         cpuUser = 0.14; cpuSystem = 0.05; cpu = cpuUser + cpuSystem
         cpuHistory = (0..<Self.historyLength).map { i in 0.12 + 0.1 * abs(sin(Double(i) / 3)) + (i % 9 == 4 ? 0.35 : 0) }
         memory = Memory(wired: 3 * gb, used: 7 * gb, compressed: 1 * gb, cache: 4 * gb, free: gb / 2, total: 18 * gb)

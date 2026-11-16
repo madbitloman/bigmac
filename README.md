@@ -2,9 +2,9 @@
 
 A small, native Mac cleaner with an ad blocker, a network monitor and a security audit. It runs only when you ask it to.
 
-![Smart Clean](docs/clean.png)
+![Overview](docs/overview.png)
 
-- **Native.** Pure SwiftUI with no dependencies, using the standard Mac sidebar, toolbar, controls and Settings window. It has no background daemon, helper or updater.
+- **Native and simple.** Pure SwiftUI with no dependencies: the standard Mac sidebar, controls and Settings window, with each pane laid out as a few plain cards. It has no background daemon, helper or updater.
 - **On demand.** Nothing scans, polls or phones home until you click a button.
 - **Reversible.** Everything goes to the Trash. System paths and app bundle internals are refused.
 - **Local first.** AI triage is optional, opt-in and redacted, and goes to your own AWS account.
@@ -13,16 +13,20 @@ A small, native Mac cleaner with an ad blocker, a network monitor and a security
 
 | | |
 |---|---|
+| **Overview** | This Mac at a glance (live CPU, memory and disk while the pane is open) and where each tool stands, with its one-click action. |
 | **Smart Clean** | App caches, logs, Xcode and simulator junk, npm/pip/gradle/CocoaPods caches, Docker leftovers, the Trash, old downloads and large files. Risky items are marked *review* and never pre-selected. |
 | **Duplicates** | Byte-identical files: matched by size, then a 64 KB hash, then a full SHA-256. One copy is always kept. |
 | **Apps** | Size, last used and leftover support files. Uninstalls to the Trash. |
 | **Ad Blocking** | A Safari content blocker (EasyList, EasyPrivacy and built-in pop-up and cookie-notice lists, with element hiding), a YouTube ad skipper for Safari, and an optional system-wide block list in `/etc/hosts` for other browsers and apps. Allowed sites are never blocked. |
 | **Network** | Who your apps talk to (`lsof`), with risk from the code signature, binary location and port. Take a single snapshot or watch live. |
 | **Security audit** | Read-only check for malware footholds: launch agents, cron, shell rc files, unsigned processes, proxy/DNS/root-certificate interception, profiles, remote-access tools, browser and system extensions, privacy grants, and Gatekeeper/SIP/FileVault/firewall posture. Matches known techniques (MITRE ATT&CK). Unwanted launch items can be removed fully: stopped, then moved to the Trash. |
-| **Menu bar** | An iStatistica-style glance at CPU, memory and disk (sampled only while open), how much BigMac can free, and one-click Run, Scan and Snapshot. |
+| **Menu bar** | A glance at CPU, memory and disk (sampled only while open), how much BigMac can free, and one-click Run, Scan and Snapshot. |
 
 <p>
+  <img src="docs/clean.png" width="49%" alt="Smart Clean">
   <img src="docs/security.png" width="49%" alt="Security audit">
+</p>
+<p>
   <img src="docs/network.png" width="49%" alt="Network monitor">
 </p>
 <img src="docs/menubar.png" width="400" alt="Menu bar">

@@ -5,6 +5,8 @@ struct AppsView: View {
     @Environment(JevSettings.self) private var jev
     @State private var pending: AppInfo?
     @State private var includeLeftovers = false  // containers/app support can hold real user data
+    @State private var showAll = false
+    private let pageSize = 80
 
     var body: some View {
         @Bindable var model = model
@@ -20,39 +22,55 @@ struct AppsView: View {
             Button { Task { await model.scan() } } label: { ActionLabel("Scan", key: "⌘R") }
                 .buttonStyle(.primary).keyboardShortcut("r").disabled(model.busy)
         } content: {
-            if model.apps.isEmpty && !model.scanning {
-                EmptyState(symbol: "square.grid.2x2", title: "No apps scanned",
-                           message: "Lists apps in /Applications and ~/Applications with Spotlight last-used dates and leftover support files.") {
-                    Button { Task { await model.scan() } } label: { ActionLabel("Scan", key: "⌘R") }.buttonStyle(.primary)
-                }
-            } else {
-                Scroller {
-                    Group {
-                        ForEach(model.visible) { app in
-                            Row {
-                                Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path)).resizable().frame(width: 26, height: 26)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 6) {
-                                        Text(app.name).fontWeight(.medium)
-                                        if let v = app.version { Text(v).font(Theme.small).foregroundStyle(Theme.tertiary) }
+            CardColumn {
+                if model.apps.isEmpty && !model.scanning {
+                    EmptyState(symbol: "square.grid.2x2", title: "No apps scanned",
+                               message: "Lists apps in /Applications and ~/Applications with Spotlight last-used dates and leftover support files.") {
+                        Button { Task { await model.scan() } } label: { ActionLabel("Scan", key: "⌘R") }.buttonStyle(.primary)
+                    }
+                } else {
+                    let unused = model.apps.filter { $0.isUnused(days: model.unusedDays) }
+                    Card("Summary") {
+                        HStack(spacing: 28) {
+                            BigStat("Apps", "\(model.apps.count)", Theme.text)
+                            BigStat("Unused \(model.unusedDays)+ days", "\(unused.count)", unused.isEmpty ? Theme.tertiary : Theme.orange)
+                            BigStat("Unused size", unused.reduce(0) { $0 + $1.size + $1.leftoverSize }.bytes, Palette.free)
+                            BigStat("Total size", model.apps.reduce(0) { $0 + $1.size }.bytes, Palette.ssd)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    let shown = showAll ? model.visible : Array(model.visible.prefix(pageSize))
+                    Card(model.onlyUnused ? "Unused" : "Applications", trailing: "\(model.visible.count)") {
+                        CardRows {
+                            ForEach(shown) { app in
+                                Row {
+                                    Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path)).resizable().frame(width: 28, height: 28)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Text(app.name).fontWeight(.medium)
+                                            if let v = app.version { Text(v).font(Theme.small).foregroundStyle(Theme.tertiary) }
+                                        }
+                                        Text(lastUsed(app)).font(Theme.small)
+                                            .foregroundStyle(app.isUnused(days: model.unusedDays) ? Theme.orange : Theme.secondary)
                                     }
-                                    Text(lastUsed(app)).font(Theme.small)
-                                        .foregroundStyle(app.isUnused(days: model.unusedDays) ? Theme.orange : Theme.secondary)
+                                    Spacer(minLength: 12)
+                                    if app.isApple { Pill(text: "Apple", tint: Theme.tertiary) }
+                                    if let r = model.jevRisk[app.url], r.value >= 0.5 {
+                                        Pill(text: "dependency \(Int(r.value * 100))%", tint: Theme.orange)
+                                    }
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Text(app.size.bytes).monospacedDigit()
+                                        if app.leftoverSize > 0 { Text("+\(app.leftoverSize.bytes)").font(Theme.small).foregroundStyle(Theme.secondary) }
+                                    }
+                                    .frame(width: 84, alignment: .trailing)
+                                    Button { pending = app } label: { ActionLabel("Uninstall") }
+                                        .buttonStyle(.ghost).disabled(!app.removable || model.busy)
                                 }
-                                Spacer(minLength: 12)
-                                if app.isApple { Pill(text: "Apple", tint: Theme.tertiary) }
-                                if let r = model.jevRisk[app.url], r.value >= 0.5 {
-                                    Pill(text: "dependency \(Int(r.value * 100))%", tint: Theme.orange)
-                                }
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(app.size.bytes).font(Theme.mono)
-                                    if app.leftoverSize > 0 { Text("+\(app.leftoverSize.bytes)").monoSecondary() }
-                                }
-                                .frame(width: 80, alignment: .trailing)
-                                Button { pending = app } label: { ActionLabel("Uninstall") }
-                                    .buttonStyle(.ghost).disabled(!app.removable || model.busy)
+                                .contextMenu { Button("Reveal in Finder") { revealInFinder(app.url) } }
                             }
-                            .contextMenu { Button("Reveal in Finder") { revealInFinder(app.url) } }
+                            if model.visible.count > shown.count {
+                                ShowMore(hidden: model.visible.count - shown.count) { showAll = true }.padding(.horizontal, 10)
+                            }
                         }
                     }
                 }

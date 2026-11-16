@@ -66,7 +66,7 @@ struct AuditView: View {
             Button { Task { await model.run() } } label: { ActionLabel("Run audit", key: "⌘R") }
                 .buttonStyle(.primary).keyboardShortcut("r").disabled(model.busy)
         } content: {
-            VStack(spacing: 0) {
+            CardColumn {
                 if let message { Callout(symbol: "info.circle", text: message, tint: Theme.blue, actionTitle: "Dismiss") { self.message = nil } }
                 if model.report.observations.isEmpty && !model.scanning {
                     EmptyState(symbol: "shield.lefthalf.filled", title: "No audit yet",
@@ -75,35 +75,25 @@ struct AuditView: View {
                     }
                 } else {
                     summary
-                    Hairline()
                     if visible.isEmpty {
                         EmptyState(symbol: "line.3.horizontal.decrease", title: "Nothing matches",
                                    message: "No items match the selected filters.") {
                             Button { facets = [] } label: { ActionLabel("Clear filters") }.buttonStyle(.ghost)
                         }
                     }
-                    Scroller {
-                        Group {
-                            ForEach(AuditItem.Kind.allCases, id: \.self) { kind in
-                                let items = visible.filter { $0.kind == kind }
-                                if !items.isEmpty {
-                                    Section { ForEach(items) { row($0) } } header: {
-                                        ListGroup {
-                                            Image(systemName: kind.symbol).font(.system(size: 11))
-                                            Text(kind.rawValue).foregroundStyle(Theme.text)
-                                            Text("\(items.count)").foregroundStyle(Theme.tertiary)
-                                            Spacer()
-                                        } rows: { EmptyView() }
-                                    }
-                                }
+                    ForEach(AuditItem.Kind.allCases, id: \.self) { kind in
+                        let items = visible.filter { $0.kind == kind }
+                        if !items.isEmpty {
+                            Card(kind.rawValue, symbol: kind.symbol, trailing: "\(items.count)") {
+                                CardRows { ForEach(items) { row($0) } }
                             }
-                            if !model.report.notes.isEmpty {
-                                Section {
-                                    ForEach(model.report.notes, id: \.self) { note in
-                                        Row { Text(note).font(Theme.small).foregroundStyle(Theme.secondary).textSelection(.enabled) }
-                                    }
-                                } header: {
-                                    ListGroup { Image(systemName: "info.circle"); Text("Not covered"); Spacer() } rows: { EmptyView() }
+                        }
+                    }
+                    if !model.report.notes.isEmpty {
+                        Card("Not covered", symbol: "info.circle") {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(model.report.notes, id: \.self) { note in
+                                    Text(note).font(Theme.small).foregroundStyle(Theme.secondary).textSelection(.enabled)
                                 }
                             }
                         }
@@ -127,29 +117,35 @@ struct AuditView: View {
         }
     }
 
-    /// Counts per level and verdict, like a Linear project header. Click to filter.
+    /// Counts per level and verdict. Click to filter.
     private var summary: some View {
         let live = model.report.observations.filter { !model.isDismissed($0) }
         let levels = live.map(model.severity)
         let calls = live.compactMap { model.verdicts[$0.id]?.call }
         let fp = model.report.observations.count - live.count
-        return FilterStrip(active: !facets.isEmpty, trailing: "\(model.report.observations.count) checked", clear: { facets = [] }) {
-            stat("High", levels.filter { $0 == .high }.count, Theme.red, .level(.high))
-            stat("Medium", levels.filter { $0 == .medium }.count, Theme.orange, .level(.medium))
-            stat("Low", levels.filter { $0 == .low }.count, Theme.yellow, .level(.low))
-            StripDivider()
-            stat("Suspicious", calls.filter { $0 == .confirmed }.count, Theme.red, .call(.confirmed))
-            stat("To check", calls.filter { $0 == .needsValidation }.count, Theme.orange, .call(.needsValidation))
-            stat("Benign", calls.filter { $0 == .benign }.count, Theme.green, .call(.benign))
-            if fp > 0 {
-                StripDivider()
-                stat("False positives", fp, Theme.secondary, .dismissed)
+        return Card("Findings", trailing: "\(model.report.observations.count) checked") {
+            if !facets.isEmpty { Button("Show all") { facets = [] }.buttonStyle(.link) }
+        } content: {
+            HStack(spacing: 6) {
+                stat("High", levels.filter { $0 == .high }.count, Theme.red, .level(.high))
+                stat("Medium", levels.filter { $0 == .medium }.count, Theme.orange, .level(.medium))
+                stat("Low", levels.filter { $0 == .low }.count, Theme.yellow, .level(.low))
+                Divider().frame(height: 40).padding(.horizontal, 6)
+                stat("Suspicious", calls.filter { $0 == .confirmed }.count, Theme.red, .call(.confirmed))
+                stat("To check", calls.filter { $0 == .needsValidation }.count, Theme.orange, .call(.needsValidation))
+                stat("Benign", calls.filter { $0 == .benign }.count, Theme.green, .call(.benign))
+                if fp > 0 {
+                    Divider().frame(height: 40).padding(.horizontal, 6)
+                    stat("False positives", fp, Theme.secondary, .dismissed)
+                }
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, -10)
         }
     }
 
     private func stat(_ label: String, _ count: Int, _ tint: Color, _ facet: Facet) -> some View {
-        StatToggle(label: label, count: count, tint: tint, isOn: facets.contains(facet)) { toggle(facet) }
+        StatTile(label: label, count: count, color: tint, isOn: facets.contains(facet)) { toggle(facet) }
     }
 
     private func row(_ o: AuditItem) -> some View {
@@ -203,8 +199,7 @@ struct AuditView: View {
                         .textSelection(.enabled)
                 }
                 .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.raised, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+                .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             HStack(spacing: 6) {
                 if let url = o.path { Button { revealInFinder(url) } label: { ActionLabel("Reveal", symbol: "folder") }.buttonStyle(.ghost) }

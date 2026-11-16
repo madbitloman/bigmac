@@ -44,17 +44,18 @@ enum Snapshot {
             try? png.write(to: dir.appending(path: "\(name).png"))
             print("wrote \(name).png")
         }
-        /// Native lists, the sidebar and the toolbar only draw in a real window, so each pane goes into an
-        /// offscreen one (with its toolbar bridged from SwiftUI) and the whole window frame is cached to a bitmap.
+        /// Native lists and the sidebar only draw in a real window, so each pane goes into an offscreen one,
+        /// styled like the app's (hidden title bar, content under it), and the whole window frame is cached to a bitmap.
         /// `height: nil` sizes the window to fit, borderless, the way the menu bar panel appears.
         func window<V: View>(_ name: String, _ view: V, width: CGFloat = 1180, height: CGFloat? = 760) async {
             let host = NSHostingController(rootView: environment(view))
-            host.sceneBridgingOptions = [.toolbars, .title]
+            host.sceneBridgingOptions = [.title]
             let height = height ?? host.sizeThatFits(in: NSSize(width: width, height: 10_000)).height
             let style: NSWindow.StyleMask = name == "menubar" ? [.borderless] : [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             let window = NSWindow(contentRect: NSRect(x: -20_000, y: 0, width: width, height: height),
                                   styleMask: style, backing: .buffered, defer: false)
-            window.toolbarStyle = .unified
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
             window.contentViewController = host
             window.setContentSize(NSSize(width: width, height: height))
             window.setFrameOrigin(NSPoint(x: -20_000, y: 0))

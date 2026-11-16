@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Menu bar popover in the iStatistica spirit: a glanceable Mac summary on cards, then BigMac's one-click scans.
+/// Menu bar popover: a glanceable Mac summary on cards, then BigMac's one-click scans.
 /// System readings refresh every 2 s only while the popover is open; scans still run only when a button is pressed.
 struct MenuBarPanel: View {
     @Environment(JunkModel.self) private var junk
@@ -13,14 +13,15 @@ struct MenuBarPanel: View {
     var body: some View {
         VStack(spacing: 10) {
             header
-            summaryCard
-            memoryCard
-            diskCard
+            SummaryCard()
+            MemoryCard()
+            DiskCard()
             actionsCard
             footer
         }
         .padding(12)
         .frame(width: 400)
+        .environment(\.cardStyle, .panel)
         .onAppear { stats.start() }
         .onDisappear { stats.stop() }
     }
@@ -32,77 +33,13 @@ struct MenuBarPanel: View {
             LogoBadge(size: 38)
             VStack(alignment: .leading, spacing: 1) {
                 Text(stats.chip.isEmpty ? stats.model : stats.chip).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
-                Text("\(stats.model) · up \(Self.uptime(stats.uptime))").font(P.small).foregroundStyle(Theme.secondary)
+                Text("\(stats.model) · up \(Format.uptime(stats.uptime))").font(Font.system(size: 13)).foregroundStyle(Theme.secondary)
             }
             Spacer()
             Button { openMain() } label: { ActionLabel("Open", key: "⌘O") }
                 .buttonStyle(.ghost).keyboardShortcut("o")
         }
         .padding(.horizontal, 4)
-    }
-
-    // MARK: Summary
-
-    private var summaryCard: some View {
-        Card("Summary") {
-            HStack(spacing: 22) {
-                ZStack {
-                    Ring(value: stats.cpu, color: Palette.cpu, diameter: 124)
-                    Ring(value: stats.memory.pressure, color: Palette.ram, diameter: 96)
-                    Ring(value: stats.disk.fraction, color: Palette.ssd, diameter: 68)
-                }
-                .frame(width: 124, height: 124)
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 18) {
-                        BigStat("CPU", Self.percent(stats.cpu), Palette.cpu)
-                        BigStat("RAM", Self.percent(stats.memory.pressure), Palette.ram)
-                    }
-                    HStack(spacing: 18) {
-                        BigStat("SSD", Self.percent(stats.disk.fraction), Palette.ssd)
-                        BigStat("Cores", "\(stats.cores)", Theme.text)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            CPUBars(history: stats.cpuHistory)
-                .frame(height: 44)
-            HStack(spacing: 14) {
-                Legend(Palette.user, "User", Self.percent(stats.cpuUser))
-                Legend(Palette.system, "System", Self.percent(stats.cpuSystem))
-            }
-        }
-    }
-
-    // MARK: Memory
-
-    private var memoryCard: some View {
-        let m = stats.memory
-        let parts: [(String, UInt64, Color)] = [
-            ("Wired", m.wired, Palette.wired), ("App", m.used, Palette.app), ("Compressed", m.compressed, Palette.compressed),
-            ("Cached", m.cache, Palette.cache), ("Free", m.free, Palette.free),
-        ]
-        return Card("Memory", trailing: ByteCountFormatter.string(fromByteCount: Int64(m.total), countStyle: .memory)) {
-            StackedBar(parts: parts.map { (Double($0.1), $0.2) }, total: Double(m.total))
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3), alignment: .leading, spacing: 8) {
-                ForEach(parts, id: \.0) { Legend($0.2, $0.0, ByteCountFormatter.string(fromByteCount: Int64($0.1), countStyle: .memory), stacked: true) }
-            }
-        }
-    }
-
-    // MARK: Disk
-
-    private var diskCard: some View {
-        let d = stats.disk
-        let cleanable = junk.allItems.reduce(0) { $0 + $1.size } + duplicates.wasted
-        return Card("Macintosh HD", trailing: "\(d.available.bytes) free of \(d.total.bytes)") {
-            // Used space, with the part BigMac found reclaimable shown in green at its end.
-            StackedBar(parts: [(Double(max(0, d.used - cleanable)), Palette.ssd), (Double(min(cleanable, d.used)), Palette.free)],
-                       total: Double(d.total))
-            HStack(spacing: 14) {
-                Legend(Palette.ssd, "Used", d.used.bytes)
-                Legend(Palette.free, "BigMac can free", cleanable > 0 ? cleanable.bytes : "scan to see")
-            }
-        }
     }
 
     // MARK: BigMac
@@ -128,7 +65,7 @@ struct MenuBarPanel: View {
             Text("Scans run only when you ask").font(.system(size: 12)).foregroundStyle(Theme.tertiary)
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
-                .buttonStyle(.plain).font(P.small).foregroundStyle(Theme.secondary).keyboardShortcut("q")
+                .buttonStyle(.plain).font(Font.system(size: 13)).foregroundStyle(Theme.secondary).keyboardShortcut("q")
         }
         .padding(.horizontal, 4)
     }
@@ -160,7 +97,7 @@ struct MenuBarPanel: View {
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.text)
-                Text(summary.0).font(P.small).foregroundStyle(summary.1).lineLimit(1)
+                Text(summary.0).font(Font.system(size: 13)).foregroundStyle(summary.1).lineLimit(1)
             }
             Spacer(minLength: 8)
             if busy { ProgressView().controlSize(.small) } else { Button(action: perform) { ActionLabel(action) }.buttonStyle(.ghost) }
@@ -174,163 +111,6 @@ struct MenuBarPanel: View {
         NSApp.setActivationPolicy(.regular)
         openWindow(id: "main")
         NSApp.activate(ignoringOtherApps: true)
-    }
-
-    static func percent(_ v: Double) -> String { "\(Int((v * 100).rounded()))%" }
-
-    static func uptime(_ t: TimeInterval) -> String {
-        let f = DateComponentsFormatter()
-        f.allowedUnits = t >= 86_400 ? [.day, .hour] : [.hour, .minute]
-        f.unitsStyle = .abbreviated
-        return f.string(from: t) ?? ""
-    }
-}
-
-/// Panel type sizes: larger than the main window's, since the popover is read at a glance.
-private enum P {
-    static let small = Font.system(size: 13)
-}
-
-/// iStatistica-like colours: magenta CPU, orange RAM, teal SSD; the memory split matches Activity Monitor's.
-private enum Palette {
-    static let cpu = Color(light: 0xB43FC0, dark: 0xD45FD8)
-    static let ram = Color(light: 0xD98A1F, dark: 0xF0AE48)
-    static let ssd = Color(light: 0x2BA597, dark: 0x5ED8C7)
-    static let user = Color(light: 0x2F7FE0, dark: 0x3E8EF7)
-    static let system = Color(light: 0xD9443F, dark: 0xE46B5A)
-    static let wired = system
-    static let app = ram
-    static let compressed = cpu
-    static let cache = user
-    static let free = Color(light: 0x2F9E4A, dark: 0x5BC55A)
-}
-
-private struct Card<Content: View>: View {
-    let title: String?
-    var trailing: String? = nil
-    @ViewBuilder let content: Content
-
-    init(_ title: String?, trailing: String? = nil, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.trailing = trailing
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let title {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(title).font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.text)
-                    Spacer()
-                    if let trailing { Text(trailing).font(P.small).foregroundStyle(Theme.secondary) }
-                }
-            }
-            content
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        // Translucent tiles over the menu bar window's own material, like Control Center.
-        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
-    }
-}
-
-private struct Ring: View {
-    let value: Double
-    let color: Color
-    let diameter: CGFloat
-
-    var body: some View {
-        ZStack {
-            Circle().stroke(Theme.border, lineWidth: 10)
-            Circle().trim(from: 0, to: max(0.005, min(value, 1)))
-                .stroke(color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.4), value: value)
-        }
-        .frame(width: diameter - 10, height: diameter - 10)
-    }
-}
-
-private struct BigStat: View {
-    let label: String, value: String, color: Color
-    init(_ label: String, _ value: String, _ color: Color) { (self.label, self.value, self.color) = (label, value, color) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(label).font(P.small).foregroundStyle(Theme.secondary)
-            Text(value).font(.system(size: 28, weight: .semibold, design: .rounded)).foregroundStyle(color).monospacedDigit()
-        }
-        .frame(minWidth: 70, alignment: .leading)
-    }
-}
-
-/// Coloured dot, label and value; `stacked` puts the value under the label, as in iStatistica's memory legend.
-private struct Legend: View {
-    let color: Color, label: String, value: String
-    var stacked = false
-    init(_ color: Color, _ label: String, _ value: String, stacked: Bool = false) {
-        (self.color, self.label, self.value, self.stacked) = (color, label, value, stacked)
-    }
-
-    var body: some View {
-        if stacked {
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) { dot; Text(label).font(P.small).foregroundStyle(Theme.secondary) }
-                Text(value).font(P.small.weight(.medium)).foregroundStyle(Theme.text).monospacedDigit().padding(.leading, 14)
-            }
-            .lineLimit(1)
-        } else {
-            HStack(spacing: 5) {
-                dot
-                Text(label).font(P.small).foregroundStyle(Theme.secondary)
-                Text(value).font(P.small.weight(.medium)).foregroundStyle(Theme.text).monospacedDigit()
-            }
-            .lineLimit(1)
-        }
-    }
-
-    private var dot: some View { Circle().fill(color).frame(width: 9, height: 9) }
-}
-
-/// Horizontal bar split into coloured parts; the rest of `total` stays as the track.
-private struct StackedBar: View {
-    let parts: [(Double, Color)]
-    let total: Double
-
-    var body: some View {
-        GeometryReader { geo in
-            HStack(spacing: 0) {
-                ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
-                    Rectangle().fill(part.1).frame(width: total > 0 ? geo.size.width * part.0 / total : 0)
-                }
-                Spacer(minLength: 0)
-            }
-            .background(Theme.border)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-        }
-        .frame(height: 14)
-    }
-}
-
-/// Recent CPU load as thin bars, newest on the right.
-private struct CPUBars: View {
-    let history: [Double]
-
-    var body: some View {
-        GeometryReader { geo in
-            let slots = SystemStats.historyLength
-            let width = geo.size.width / CGFloat(slots)
-            HStack(alignment: .bottom, spacing: 0) {
-                Spacer(minLength: 0)
-                ForEach(Array(history.enumerated()), id: \.offset) { _, v in
-                    RoundedRectangle(cornerRadius: 1).fill(Palette.user)
-                        .frame(width: max(1, width - 2), height: max(1, geo.size.height * min(v, 1)))
-                        .frame(width: width)
-                }
-            }
-            .frame(maxHeight: .infinity, alignment: .bottom)
-            .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
-        }
     }
 }
 

@@ -40,7 +40,7 @@ struct BigMacApp: App {
             models(ContentView())
                 .frame(minWidth: 980, minHeight: 620)
         }
-        .windowToolbarStyle(.unified)
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1180, height: 760)
         .commands {

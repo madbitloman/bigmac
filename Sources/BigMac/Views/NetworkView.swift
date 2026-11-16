@@ -7,6 +7,8 @@ struct NetworkView: View {
     @State private var onlyFlagged = false
     @State private var levels: Set<RiskLevel> = []
     @State private var onlyTrusted = false
+    @State private var showAll = false
+    private let pageSize = 100
 
     private var rows: [ConnectionRow] {
         if onlyTrusted { return model.rows.filter(\.trusted) }
@@ -14,24 +16,30 @@ struct NetworkView: View {
         return onlyFlagged ? model.rows.filter { $0.level >= .medium || (model.jev[$0.jevKey]?.value ?? 0) >= 0.5 } : model.rows
     }
 
-    private var strip: some View {
+    /// Counts per risk level; click one to show only those.
+    private var summary: some View {
         let count = { (l: RiskLevel) in model.rows.filter { $0.level == l }.count }
         let trusted = model.rows.filter(\.trusted).count
-        return FilterStrip(active: !levels.isEmpty || onlyTrusted,
-                           trailing: "\(Set(model.rows.map(\.connection.pid)).count) processes",
-                           clear: { levels = []; onlyTrusted = false }) {
-            ForEach([RiskLevel.high, .medium, .low, .none], id: \.self) { l in
-                StatToggle(label: l.label, count: count(l), tint: Theme.risk(l), isOn: levels.contains(l)) {
-                    onlyTrusted = false
-                    if levels.contains(l) { levels.remove(l) } else { levels.insert(l) }
+        let filtering = !levels.isEmpty || onlyTrusted
+        return Card("Connections", trailing: "\(model.rows.count) open · \(Set(model.rows.map(\.connection.pid)).count) processes") {
+            if filtering { Button("Show all") { levels = []; onlyTrusted = false }.buttonStyle(.link) }
+        } content: {
+            HStack(spacing: 6) {
+                ForEach([RiskLevel.high, .medium, .low, .none], id: \.self) { l in
+                    StatTile(label: l.label, count: count(l), color: Theme.risk(l), isOn: levels.contains(l)) {
+                        onlyTrusted = false
+                        if levels.contains(l) { levels.remove(l) } else { levels.insert(l) }
+                    }
                 }
-            }
-            if trusted > 0 {
-                StripDivider()
-                StatToggle(label: "Trusted", count: trusted, tint: Theme.secondary, isOn: onlyTrusted) {
-                    levels = []; onlyTrusted.toggle()
+                if trusted > 0 {
+                    Divider().frame(height: 40).padding(.horizontal, 6)
+                    StatTile(label: "Trusted", count: trusted, color: Theme.secondary, isOn: onlyTrusted) {
+                        levels = []; onlyTrusted.toggle()
+                    }
                 }
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, -10)
         }
     }
 
@@ -59,30 +67,35 @@ struct NetworkView: View {
             }
             .buttonStyle(.primary)
         } content: {
-            if model.rows.isEmpty {
-                EmptyState(symbol: "point.3.connected.trianglepath.dotted", title: "No reading yet",
-                           message: "Snapshot lists your processes' open connections once. Watch re-reads them every \(Int(model.interval)) s until you stop it. Risk comes from code signature, binary location and port.") {
-                    Button { Task { await model.refresh() } } label: { ActionLabel("Snapshot", key: "⌘R") }.buttonStyle(.primary)
-                }
-            } else {
-                VStack(spacing: 0) {
-                strip
-                Hairline()
-                Scroller {
-                    Group {
-                        Section {
-                            ForEach(rows) { row($0) }
-                        } header: {
-                            ListGroup {
+            CardColumn {
+                if model.rows.isEmpty {
+                    EmptyState(symbol: "point.3.connected.trianglepath.dotted", title: "No reading yet",
+                               message: "Snapshot lists your processes' open connections once. Watch re-reads them every \(Int(model.interval)) s until you stop it. Risk comes from code signature, binary location and port.") {
+                        Button { Task { await model.refresh() } } label: { ActionLabel("Snapshot", key: "⌘R") }.buttonStyle(.primary)
+                    }
+                } else {
+                    summary
+                    let shown = showAll ? rows : Array(rows.prefix(pageSize))
+                    Card(nil) {
+                        CardRows {
+                            HStack(spacing: 10) {
                                 Text("Risk").frame(width: 116, alignment: .leading)
                                 Text("Process")
                                 Spacer()
                                 Text("Remote").frame(width: 190, alignment: .leading)
                                 Text("Signer").frame(width: 150, alignment: .leading)
-                            } rows: { EmptyView() }
+                            }
+                            .font(Theme.small).foregroundStyle(Theme.secondary)
+                            .padding(.horizontal, 10).padding(.bottom, 4)
+                            if rows.isEmpty {
+                                Text("Nothing matches these filters.").font(Theme.small).foregroundStyle(Theme.secondary).padding(10)
+                            }
+                            ForEach(shown) { row($0) }
+                            if rows.count > shown.count {
+                                ShowMore(hidden: rows.count - shown.count) { showAll = true }.padding(.horizontal, 10)
+                            }
                         }
                     }
-                }
                 }
             }
         }

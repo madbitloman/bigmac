@@ -14,19 +14,16 @@ struct AdBlockView: View {
             }
             .buttonStyle(.ghost).disabled(!model.linkedToSafari)
         } content: {
-            VStack(spacing: 0) {
+            CardColumn {
                 if let message = model.message {
                     Callout(symbol: "exclamationmark.triangle", text: message, actionTitle: "Dismiss") { model.message = nil }
                 }
-                Form {
-                    safari
-                    categories
-                    allowed
-                    systemWide
-                    credits
-                }
-                .formStyle(.grouped)
-                .scrollContentBackground(.hidden)
+                overview
+                safari
+                categories
+                allowed
+                systemWide
+                credits
             }
         }
         .task { await model.refresh() }
@@ -58,77 +55,87 @@ struct AdBlockView: View {
         confirmSystemWide == true ? "Block \(model.hostsAvailable.formatted()) ad and tracker servers in every app?" : "Turn off system-wide blocking?"
     }
 
-    // MARK: Sections
+    // MARK: Cards
+
+    /// The headline numbers, like the top of a stats card.
+    private var overview: some View {
+        Card("Summary") {
+            HStack(spacing: 28) {
+                BigStat("Safari", model.blockerEnabled == true ? "On" : "Off", model.blockerEnabled == true ? Theme.green : Theme.tertiary)
+                BigStat("Rules", model.ruleCount.formatted(), Palette.user)
+                BigStat("Allowed sites", "\(model.settings.allowedDomains.count)", Theme.text)
+                BigStat("System-wide", model.hosts.installed ? model.hosts.entries.formatted() : "Off",
+                        model.hosts.installed ? Palette.ssd : Theme.tertiary)
+                Spacer(minLength: 0)
+            }
+        }
+    }
 
     private var safari: some View {
-        Section {
-            extensionRow(title: "Ad and tracker blocker",
-                         detail: "\(model.ruleCount.formatted()) rules. Blocks requests and hides ad slots in Safari.",
-                         enabled: model.blockerEnabled, identifier: RuleStore.contentBlockerIdentifier)
-            extensionRow(title: "YouTube ad skipper",
-                         detail: "Skips video ads on youtube.com. Allow it on youtube.com when Safari asks.",
-                         enabled: model.youTubeEnabled, identifier: RuleStore.youTubeExtensionIdentifier)
-        } header: {
-            Text("Safari")
-        } footer: {
+        Card("Safari", symbol: "safari") {
+            CardRows {
+                extensionRow(title: "Ad and tracker blocker",
+                             detail: "\(model.ruleCount.formatted()) rules. Blocks requests and hides ad slots in Safari.",
+                             enabled: model.blockerEnabled, identifier: RuleStore.contentBlockerIdentifier)
+                extensionRow(title: "YouTube ad skipper",
+                             detail: "Skips video ads on youtube.com. Allow it on youtube.com when Safari asks.",
+                             enabled: model.youTubeEnabled, identifier: RuleStore.youTubeExtensionIdentifier)
+            }
             if !model.linkedToSafari {
-                Text("Open BigMac.app (not a development build) to use the Safari extensions.").formFooter()
+                Note("Open BigMac.app (not a development build) to use the Safari extensions.")
             } else if model.blockerEnabled != true || model.youTubeEnabled != true {
-                Text("Safari extensions are switched on in Safari: Settings > Extensions, then tick BigMac's.").formFooter()
+                Note("Safari extensions are switched on in Safari: Settings > Extensions, then tick BigMac's.")
             }
         }
     }
 
     private func extensionRow(title: String, detail: String, enabled: Bool?, identifier: String) -> some View {
-        LabeledContent {
-            HStack(spacing: 10) {
-                switch enabled {
-                case true?: Pill(text: "On", tint: Theme.green)
-                case false?: Pill(text: "Off", tint: Theme.tertiary)
-                case nil: EmptyView()
-                }
-                Button(enabled == true ? "Settings…" : "Turn On in Safari…") { model.openSafariSettings(identifier) }
-                    .disabled(!model.linkedToSafari)
+        SettingRow(title: title, detail: detail) {
+            switch enabled {
+            case true?: Pill(text: "On", tint: Theme.green)
+            case false?: Pill(text: "Off", tint: Theme.tertiary)
+            case nil: EmptyView()
             }
-        } label: {
-            Text(title)
-            Text(detail)
+            Button(enabled == true ? "Settings…" : "Turn On in Safari…") { model.openSafariSettings(identifier) }
+                .buttonStyle(.ghost).disabled(!model.linkedToSafari)
         }
     }
 
     private var categories: some View {
-        Section {
-            ForEach(BlockingCategory.allCases) { category in
-                Toggle(isOn: Binding(get: { model.isOn(category) }, set: { model.set(category, on: $0) })) {
-                    Text(category.title)
-                    Text(category.detail)
+        Card("Block in Safari", symbol: "hand.raised") {
+            CardRows {
+                ForEach(BlockingCategory.allCases) { category in
+                    SettingRow(title: category.title, detail: category.detail) {
+                        Toggle("", isOn: Binding(get: { model.isOn(category) }, set: { model.set(category, on: $0) }))
+                            .toggleStyle(.switch).labelsHidden()
+                    }
                 }
             }
-        } header: {
-            Text("Block in Safari")
         }
     }
 
     private var allowed: some View {
-        Section {
-            ForEach(model.settings.allowedDomains, id: \.self) { domain in
-                LabeledContent(domain) {
-                    Button { model.removeAllowed(domain) } label: { Image(systemName: "minus.circle.fill") }
-                        .buttonStyle(.borderless).foregroundStyle(.secondary).help("Block on \(domain) again")
+        Card("Allowed Sites", symbol: "checkmark.shield", trailing: "\(model.settings.allowedDomains.count)") {
+            CardRows {
+                ForEach(model.settings.allowedDomains, id: \.self) { domain in
+                    Row {
+                        Text(domain)
+                        Spacer()
+                        Button { model.removeAllowed(domain) } label: { Image(systemName: "minus.circle.fill") }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary).help("Block on \(domain) again")
+                    }
                 }
             }
             HStack {
                 TextField("Allow a site", text: $newSite, prompt: Text("example.com"))
+                    .textFieldStyle(.roundedBorder)
                     .onSubmit(add)
                     .onChange(of: newSite) { siteRejected = false }
-                Button("Add", action: add).disabled(newSite.trimmed.isEmpty)
+                Button("Add", action: add).buttonStyle(.ghost).disabled(newSite.trimmed.isEmpty)
             }
-        } header: {
-            Text("Allowed Sites")
-        } footer: {
-            Text(siteRejected ? "That isn't a site name. Enter something like example.com."
-                              : "Nothing is blocked on these sites. They're also left out of the system-wide list.")
-                .formFooter(siteRejected ? Theme.red : Theme.secondary)
+            Note(siteRejected ? "That isn't a site name. Enter something like example.com."
+                              : "Nothing is blocked on these sites. They're also left out of the system-wide list.",
+                 color: siteRejected ? Theme.red : Theme.secondary)
         }
     }
 
@@ -137,28 +144,21 @@ struct AdBlockView: View {
     }
 
     private var systemWide: some View {
-        Section {
-            LabeledContent {
-                HStack(spacing: 10) {
+        Card("System-Wide", symbol: "globe") {
+            CardRows {
+                SettingRow(title: "Block ads in every app", detail: systemWideDetail) {
                     if model.hostsBusy { ProgressView().controlSize(.small) }
                     if model.hosts.installed {
                         if !model.hostsUpToDate {
-                            Button("Update…") { confirmSystemWide = true }.disabled(model.hostsBusy)
+                            Button("Update…") { confirmSystemWide = true }.buttonStyle(.ghost).disabled(model.hostsBusy)
                         }
-                        Button("Turn Off…") { confirmSystemWide = false }.disabled(model.hostsBusy)
+                        Button("Turn Off…") { confirmSystemWide = false }.buttonStyle(.ghost).disabled(model.hostsBusy)
                     } else {
-                        Button("Turn On…") { confirmSystemWide = true }.disabled(model.hostsBusy || model.hosts.malformed)
+                        Button("Turn On…") { confirmSystemWide = true }.buttonStyle(.ghost).disabled(model.hostsBusy || model.hosts.malformed)
                     }
                 }
-            } label: {
-                Text("Block ads in every app")
-                Text(systemWideDetail)
             }
-        } header: {
-            Text("System-Wide")
-        } footer: {
-            Text("Adds ad and tracker servers to /etc/hosts, so Chrome, Firefox and other apps can't reach them. It blocks whole servers only and can't hide page elements. Browsers that use their own secure DNS, and some VPNs, skip it.")
-                .formFooter()
+            Note("Adds ad and tracker servers to /etc/hosts, so Chrome, Firefox and other apps can't reach them. It blocks whole servers only and can't hide page elements. Browsers that use their own secure DNS, and some VPNs, skip it.")
         }
     }
 
@@ -171,23 +171,46 @@ struct AdBlockView: View {
     }
 
     private var credits: some View {
-        Section {
-            ForEach(model.catalog.lists) { list in
-                LabeledContent {
-                    Link(list.license, destination: URL(string: list.homepage) ?? URL(string: "https://easylist.to")!)
-                } label: {
-                    Text(list.title)
-                    Text("\(list.ruleCount.formatted()) rules, version \(list.version)")
+        Card("Block Lists", symbol: "list.bullet.rectangle") {
+            CardRows {
+                ForEach(model.catalog.lists) { list in
+                    SettingRow(title: list.title, detail: "\(list.ruleCount.formatted()) rules, version \(list.version)") {
+                        Link(list.license, destination: URL(string: list.homepage) ?? URL(string: "https://easylist.to")!)
+                    }
+                }
+                SettingRow(title: "StevenBlack hosts", detail: "System-wide list") {
+                    Link("MIT", destination: URL(string: "https://github.com/StevenBlack/hosts")!)
                 }
             }
-            LabeledContent {
-                Link("MIT", destination: URL(string: "https://github.com/StevenBlack/hosts")!)
-            } label: {
-                Text("StevenBlack hosts")
-                Text("System-wide list")
-            }
-        } header: {
-            Text("Block Lists")
         }
+    }
+}
+
+/// Title and grey detail on the left, controls on the right, as in a settings list.
+struct SettingRow<Trailing: View>: View {
+    let title: String
+    let detail: String
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        Row {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).fontWeight(.medium)
+                Text(detail).font(Theme.small).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            HStack(spacing: 10) { trailing }
+        }
+    }
+}
+
+/// Explanatory grey text at the bottom of a card.
+struct Note: View {
+    let text: String
+    var color: Color = Theme.secondary
+    init(_ text: String, color: Color = Theme.secondary) { (self.text, self.color) = (text, color) }
+
+    var body: some View {
+        Text(text).font(Theme.small).foregroundStyle(color).fixedSize(horizontal: false, vertical: true)
     }
 }

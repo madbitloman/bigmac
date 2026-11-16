@@ -21,7 +21,7 @@ struct CleanView: View {
             Button { confirm = true } label: { ActionLabel(model.selected.isEmpty ? "Trash" : "Trash \(model.selectedBytes.bytes)", symbol: "trash") }
                 .buttonStyle(.primary).disabled(model.selected.isEmpty || model.busy)
         } content: {
-            VStack(spacing: 0) {
+            CardColumn {
                 if model.anyDenied { FDACallout() }
                 if model.results.isEmpty && !model.scanning {
                     EmptyState(symbol: "sparkles", title: "Nothing scanned yet",
@@ -29,13 +29,10 @@ struct CleanView: View {
                         Button { Task { await model.scan() } } label: { ActionLabel("Scan", key: "⌘R") }.buttonStyle(.primary)
                     }
                 } else {
-                    Scroller {
-                        Group {
-                            ForEach(JunkCategory.allCases) { category in
-                                if let result = model.results[category], !result.items.isEmpty || result.note != nil {
-                                    Section { if !collapsed.contains(category) { rows(category, result) } } header: { header(category, result) }
-                                }
-                            }
+                    summary
+                    ForEach(JunkCategory.allCases) { category in
+                        if let result = model.results[category], !result.items.isEmpty || result.note != nil {
+                            card(category, result)
                         }
                     }
                 }
@@ -48,35 +45,54 @@ struct CleanView: View {
         }
     }
 
-    private func header(_ category: JunkCategory, _ result: CategoryResult) -> some View {
-        ListGroup {
-            Button {
-                if collapsed.contains(category) { collapsed.remove(category) } else { collapsed.insert(category) }
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "chevron.right").font(.system(size: 8.5, weight: .bold))
-                        .rotationEffect(.degrees(collapsed.contains(category) ? 0 : 90))
-                    Image(systemName: category.symbol).font(.system(size: 11))
-                    Text(category.title).foregroundStyle(Theme.text)
-                    Text("\(result.items.count)").foregroundStyle(Theme.tertiary)
-                }
+    private var found: [(JunkCategory, Int64)] {
+        JunkCategory.allCases.compactMap { c in model.results[c].flatMap { $0.total > 0 ? (c, $0.total) : nil } }
+    }
+
+    /// Colours go by position among the categories that found something, so neighbours never share one.
+    private func color(_ category: JunkCategory) -> Color {
+        Palette.series[(found.firstIndex { $0.0 == category } ?? 0) % Palette.series.count]
+    }
+
+    /// Total found, split by category like the Memory card.
+    private var summary: some View {
+        let total = found.reduce(0) { $0 + $1.1 }
+        return Card("Found") {
+            HStack(spacing: 28) {
+                BigStat("Reclaimable", total.bytes, Palette.free)
+                BigStat("Selected", model.selected.isEmpty ? "–" : model.selectedBytes.bytes, model.selected.isEmpty ? Theme.tertiary : Theme.accent)
+                BigStat("Items", "\(model.allItems.count)", Theme.text)
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            if let note = result.note { Text(note).foregroundStyle(Theme.tertiary).lineLimit(1) }
-            Spacer()
-            Text(result.total.bytes).monospacedDigit()
+            StackedBar(parts: found.map { (Double($0.1), color($0.0)) }, total: Double(max(total, 1)))
+            LegendGrid(columns: 4) {
+                ForEach(found, id: \.0) { Legend(color($0.0), $0.0.title, $0.1.bytes, stacked: true) }
+            }
+        }
+    }
+
+    private func card(_ category: JunkCategory, _ result: CategoryResult) -> some View {
+        let open = !collapsed.contains(category)
+        return Card(category.title, symbol: category.symbol,
+                    trailing: "\(result.items.count) items · \(result.total.bytes)") {
             if !result.items.isEmpty {
-                Button(allSelected(result) ? "Deselect" : "Select all") { toggleAll(result) }
-                    .buttonStyle(.plain).foregroundStyle(Theme.accent)
+                Button(allSelected(result) ? "Deselect" : "Select all") { toggleAll(result) }.buttonStyle(.link)
             }
-        } rows: { EmptyView() }
+            Button {
+                if open { collapsed.insert(category) } else { collapsed.remove(category) }
+            } label: {
+                Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+                    .rotationEffect(.degrees(open ? 0 : -90))
+            }
+            .buttonStyle(.borderless).foregroundStyle(Theme.secondary).help(open ? "Collapse" : "Expand")
+        } content: {
+            if let note = result.note { Text(note).font(Theme.small).foregroundStyle(Theme.secondary) }
+            if open, !result.items.isEmpty { CardRows { rows(category, result) } }
+        }
     }
 
     @ViewBuilder
     private func rows(_ category: JunkCategory, _ result: CategoryResult) -> some View {
-        if result.items.isEmpty {
-            Row { Text("Nothing to clean").foregroundStyle(Theme.tertiary) }
-        }
         let shown = showAll.contains(category) ? result.items : Array(result.items.prefix(pageSize))
         ForEach(shown) { item in
             Row(selected: model.selected.contains(item.url)) {
@@ -111,11 +127,11 @@ struct CleanView: View {
             .contextMenu { if item.docker == nil { Button("Reveal in Finder") { revealInFinder(item.url) } } }
         }
         if result.items.count > shown.count {
-            Row {
-                Button("Show all \(result.items.count)") { showAll.insert(category) }
-                    .buttonStyle(.plain).foregroundStyle(Theme.accent)
-                Text("\(result.items.count - shown.count) more · Select all still covers every item").font(Theme.small).foregroundStyle(Theme.tertiary)
+            HStack(spacing: 8) {
+                ShowMore(hidden: result.items.count - shown.count) { showAll.insert(category) }
+                Text("Select all still covers every item").font(Theme.small).foregroundStyle(Theme.tertiary).padding(.top, 6)
             }
+            .padding(.horizontal, 10)
         }
     }
 

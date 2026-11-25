@@ -17,16 +17,16 @@ extension BlockingCategory {
         switch self {
         case .ads: "Ad networks and common ad slots (EasyList)"
         case .trackers: "Analytics and cross-site tracking scripts (EasyPrivacy)"
-        case .popups: "Pop-up and pop-under networks, ad overlays"
+        case .popups: "Pop-up and pop-under networks, ad overlays, and with the pop-up blocker, tabs a site opens without your click"
         case .annoyances: "Consent banners, newsletter and survey pop-ups"
         case .social: "Embedded like and share buttons. Can break signing in with a social account."
-        case .strictPopups: "Every new window opened to another site, except common sign-in and payment windows"
+        case .strictPopups: "Every new window opened to another site, except common sign-in and payment windows. With the pop-up blocker, also windows a site's own buttons open."
         }
     }
 }
 
 /// The Ad Blocking pane: Safari content blocker settings (shared with the extension through the app group),
-/// the state of BigMac's two Safari extensions, and the optional system-wide hosts list.
+/// the state of BigMac's three Safari extensions, and the optional system-wide hosts list.
 @MainActor @Observable
 final class AdBlockModel {
     private let store: RuleStore
@@ -38,6 +38,9 @@ final class AdBlockModel {
     /// nil until Safari has answered (or when it can't, outside the app bundle).
     var blockerEnabled: Bool?
     var youTubeEnabled: Bool?
+    var popupBlockerEnabled: Bool?
+    /// Pop-ups the Safari pop-up blocker has stopped (it counts them in the app group).
+    var blockedPopups = 0
 
     var hosts = HostsBlocker.Status()
     /// Fingerprint the hosts block would have with the current allowed sites.
@@ -128,6 +131,8 @@ final class AdBlockModel {
         if linkedToSafari {
             blockerEnabled = try? await SFContentBlockerManager.stateOfContentBlocker(withIdentifier: RuleStore.contentBlockerIdentifier).isEnabled
             youTubeEnabled = try? await SFSafariExtensionManager.stateOfSafariExtension(withIdentifier: RuleStore.youTubeExtensionIdentifier).isEnabled
+            popupBlockerEnabled = try? await SFSafariExtensionManager.stateOfSafariExtension(withIdentifier: RuleStore.popupBlockerExtensionIdentifier).isEnabled
+            blockedPopups = store.blockedPopups
         }
         await refreshHosts()
     }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Ad Blocking: BigMac's Safari content blocker and YouTube ad skipper, and the optional system-wide hosts list.
+/// Ad Blocking: BigMac's Safari content blocker, pop-up blocker and YouTube ad skipper, and the optional system-wide hosts list.
 struct AdBlockView: View {
     @Environment(AdBlockModel.self) private var model
     @State private var newSite = ""
@@ -77,16 +77,25 @@ struct AdBlockView: View {
                 extensionRow(title: "Ad and tracker blocker",
                              detail: "\(model.ruleCount.formatted()) rules. Blocks requests and hides ad slots in Safari.",
                              enabled: model.blockerEnabled, identifier: RuleStore.contentBlockerIdentifier)
+                extensionRow(title: "Pop-up blocker",
+                             detail: popupBlockerDetail,
+                             enabled: model.popupBlockerEnabled, identifier: RuleStore.popupBlockerExtensionIdentifier)
                 extensionRow(title: "YouTube ad skipper",
                              detail: "Skips video ads on youtube.com. Allow it on youtube.com when Safari asks.",
                              enabled: model.youTubeEnabled, identifier: RuleStore.youTubeExtensionIdentifier)
             }
             if !model.linkedToSafari {
                 Note("Open BigMac.app (not a development build) to use the Safari extensions.")
-            } else if model.blockerEnabled != true || model.youTubeEnabled != true {
-                Note("Safari extensions are switched on in Safari: Settings > Extensions, then tick BigMac's.")
+            } else if model.blockerEnabled != true || model.youTubeEnabled != true || model.popupBlockerEnabled != true {
+                Note("Safari extensions are switched on in Safari: Settings > Extensions, then tick BigMac's. The pop-up blocker asks to read and change pages on every site: it needs that to see which clicks you made.")
             }
         }
+    }
+
+    private var popupBlockerDetail: String {
+        var text = "Stops tabs, windows and pop-unders a site opens without your click, and invisible full-page links. Optional: allow it on all websites when Safari asks."
+        if model.blockedPopups > 0 { text += " \(model.blockedPopups.formatted()) blocked so far." }
+        return text
     }
 
     private func extensionRow(title: String, detail: String, enabled: Bool?, identifier: String) -> some View {

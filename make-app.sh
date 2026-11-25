@@ -42,6 +42,13 @@ appex BigMacContentBlocker Extensions/ContentBlocker Extensions/ContentBlocker/*
 cp Extensions/Filters/*.json "$APP/Contents/PlugIns/BigMacContentBlocker.appex/Contents/Resources/"
 appex BigMacYouTube Extensions/YouTube Extensions/YouTube/*.swift -framework SafariServices
 cp Extensions/YouTube/Resources/* "$APP/Contents/PlugIns/BigMacYouTube.appex/Contents/Resources/"
+# The pop-up blocker reads BigMac's settings through the app group, so it shares the AdBlock code too.
+appex BigMacPopupBlocker Extensions/PopupBlocker Extensions/PopupBlocker/*.swift Sources/BigMac/AdBlock/Shared/*.swift -framework SafariServices
+POPUPS="$APP/Contents/PlugIns/BigMacPopupBlocker.appex/Contents/Resources"
+cp Extensions/PopupBlocker/Resources/* "$POPUPS/"
+# The guard runs in the page's world and its relay needs the same rules in the isolated world; browsers
+# inject a file only once per frame, so the relay's copy goes in under a second name.
+cp Extensions/PopupBlocker/Resources/popup-guard.js "$POPUPS/popup-guard-rules.js"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -74,6 +81,7 @@ sign() { # path entitlements
 }
 sign "$APP/Contents/PlugIns/BigMacContentBlocker.appex" Extensions/ContentBlocker/Extension.entitlements
 sign "$APP/Contents/PlugIns/BigMacYouTube.appex" Extensions/YouTube/Extension.entitlements
+sign "$APP/Contents/PlugIns/BigMacPopupBlocker.appex" Extensions/PopupBlocker/Extension.entitlements
 sign "$APP" Resources/BigMac.entitlements
 codesign --verify --strict --deep --verbose=2 "$APP"
 

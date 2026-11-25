@@ -82,6 +82,12 @@ enum SelfTest {
         check(scripts.contains { $0["world"] as? String == "MAIN" && ($0["js"] as? [String]) == ["popup-guard.js"] && $0["run_at"] as? String == "document_start" }
               && scripts.contains { ($0["js"] as? [String]) == ["popup-guard-rules.js", "popup-relay.js"] },
               "pop-up blocker manifest runs the guard in the page's world at document_start, and its relay beside it")
+        check(DomainNormalizer.siteName(from: "www.Example.com") == "example.com" && DomainNormalizer.siteName(from: "news.example.co.uk") == "news.example.co.uk",
+              "the pop-up blocker's allow and disallow messages take a bare domain, normalised")
+        let refusedSites: [Any?] = ["https://example.com", "example.com/x", "user@example.com", "example.com:8080", "example.com?a", "example.com#a",
+                                    " example.com", "127.0.0.1", "localhost", "", String(repeating: "a.", count: 127) + "com", 42, nil]
+        check(refusedSites.allSatisfy { DomainNormalizer.siteName(from: $0) == nil },
+              "a URL, path, user, port, address, oversize name or non-string never becomes an allowed site")
 
         let names = HostsBlocker.names(allowed: ["doubleclick.net"])
         check(names.count > 70_000, "system-wide list has \(names.count) servers")

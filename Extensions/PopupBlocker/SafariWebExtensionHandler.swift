@@ -8,6 +8,9 @@ import SafariServices
 /// Messages ({"type": ...}):
 ///   "settings"            -> {"popups", "strict", "allowed", "linked"}
 ///   "allow", "site"       adds the site to the allowed list (the content blocker reloads too), then as "settings"
+///   "disallow", "site"    removes that entry from the allowed list (the content blocker reloads too), then as "settings"
+/// Only the toolbar button's page asks for "allow" and "disallow" (background.js checks the sender).
+/// "site" must be a bare domain (DomainNormalizer.siteName); anything else changes nothing.
 ///   "blocked"             counts one blocked pop-up for BigMac's Ad Blocking pane, then as "settings"
 @objc(SafariWebExtensionHandler)
 final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
@@ -27,12 +30,17 @@ enum PopupBlockerSettings {
         var settings = store?.loadSettings() ?? BlockerSettings()
         switch message["type"] as? String {
         case "allow":
-            if let store, let site = message["site"] as? String, let domain = DomainNormalizer.normalize(site),
+            if let store, let domain = DomainNormalizer.siteName(from: message["site"]),
                !settings.allowedDomains.contains(domain) {
                 settings.allowedDomains.append(domain)
                 settings.allowedDomains.sort()
-                try? store.save(settings)
-                SFContentBlockerManager.reloadContentBlocker(withIdentifier: RuleStore.contentBlockerIdentifier) { _ in }
+                save(settings, in: store)
+            }
+        case "disallow":
+            if let store, let domain = DomainNormalizer.siteName(from: message["site"]),
+               settings.allowedDomains.contains(domain) {
+                settings.allowedDomains.removeAll { $0 == domain }
+                save(settings, in: store)
             }
         case "blocked":
             store?.countBlockedPopup()
@@ -45,5 +53,10 @@ enum PopupBlockerSettings {
             "allowed": settings.allowedDomains,
             "linked": store != nil,
         ]
+    }
+
+    private static func save(_ settings: BlockerSettings, in store: RuleStore) {
+        try? store.save(settings)
+        SFContentBlockerManager.reloadContentBlocker(withIdentifier: RuleStore.contentBlockerIdentifier) { _ in }
     }
 }

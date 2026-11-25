@@ -56,6 +56,33 @@ enum SelfTest {
         let emptyRules = (try? JSONSerialization.jsonObject(with: Data(contentsOf: rulesFile))) as? [Any]
         check(emptyCount == 0 && emptyRules?.count == 1, "everything off still gives Safari a valid one-rule list")
 
+        print("Pop-up blocking")
+        let popupRules = (assembled ?? []).filter {
+            (($0["trigger"] as? [String: Any])?["resource-type"] as? [String])?.contains("popup") == true
+        }
+        let popadsFilter = RuleCompiler.urlFilter(forDomain: "popads.net")
+        check(popupRules.contains { ($0["trigger"] as? [String: Any])?["url-filter"] as? String == popadsFilter },
+              "pop-up networks are blocked as pop-up windows (resource-type popup)")
+        check(popupRules.count > 2_000, "EasyList's $popup rules reach Safari as pop-up rules (\(popupRules.count))")
+        let popupExtension = URL(filePath: FileManager.default.currentDirectoryPath).appending(path: "Extensions/PopupBlocker")
+        let guardSource = (try? Data(contentsOf: popupExtension.appending(path: "Resources/popup-guard.js"))) ?? Data()
+        let guardHash = SHA256.hash(data: guardSource).map { String(format: "%02x", $0) }.joined()
+        let recordedHash = (try? String(contentsOf: popupExtension.appending(path: "popup-guard.sha256"), encoding: .utf8))?
+            .split(separator: " ").first.map(String.init)
+        check(!guardSource.isEmpty && guardHash == recordedHash,
+              "popup-guard.js is the recorded copy of the blocking engine's guard (\(guardHash.prefix(12)))")
+        let guardText = String(decoding: guardSource, as: UTF8.self)
+        let destinations = guardText.range(of: #"ALLOWED_DESTINATIONS = \[[^\]]*\]"#, options: .regularExpression).map {
+            guardText[$0].matches(of: /"([^"]+)"/).map { String($0.1) }
+        } ?? []
+        check(Set(destinations) == Set(FilterLists.popupAllowedDomains) && destinations.count == FilterLists.popupAllowedDomains.count,
+              "the guard's sign-in and payment windows match FilterLists.popupAllowedDomains")
+        let popupManifest = (try? JSONSerialization.jsonObject(with: Data(contentsOf: popupExtension.appending(path: "Resources/manifest.json")))) as? [String: Any]
+        let scripts = (popupManifest?["content_scripts"] as? [[String: Any]]) ?? []
+        check(scripts.contains { $0["world"] as? String == "MAIN" && ($0["js"] as? [String]) == ["popup-guard.js"] && $0["run_at"] as? String == "document_start" }
+              && scripts.contains { ($0["js"] as? [String]) == ["popup-guard-rules.js", "popup-relay.js"] },
+              "pop-up blocker manifest runs the guard in the page's world at document_start, and its relay beside it")
+
         let names = HostsBlocker.names(allowed: ["doubleclick.net"])
         check(names.count > 70_000, "system-wide list has \(names.count) servers")
         check(!names.contains("doubleclick.net") && !names.contains { $0.hasSuffix(".doubleclick.net") }, "allowed site and its subdomains left out")

@@ -35,7 +35,7 @@
 
   api.runtime.onMessage.addListener((message) => {
     if (message?.type === "popup-guard-reload") loadSettings();
-    if (message?.type === "popup-toast" && window === window.top) showToast(message);
+    if (message?.type === "popup-toast" && window === window.top && Date.now() >= quietUntil) showToast(message);
     return false;
   });
 
@@ -43,6 +43,12 @@
 
   let toast = null;
   let hideTimer = 0;
+  // The notice sits in the page, so a click on its buttons also reaches the page's own click
+  // handlers; on a click-anywhere site that is one more blocked attempt. Don't show that one.
+  let quietUntil = 0;
+  const settle = () => {
+    quietUntil = Date.now() + 2000;
+  };
 
   const STYLE = `
     :host { all: initial; }
@@ -116,6 +122,7 @@
     if (opensSomewhere) {
       const once = element("button", "", "Allow once");
       once.addEventListener("click", () => {
+        settle();
         window.open(url, "_blank", "noopener");
         hide();
       });
@@ -125,6 +132,7 @@
       const always = element("button", "", "Always allow on this site");
       always.title = `Adds ${site} to BigMac's allowed sites: nothing is blocked there, ads included.`;
       always.addEventListener("click", () => {
+        settle();
         if (opensSomewhere) window.open(url, "_blank", "noopener");
         api.runtime.sendMessage({ type: "popup-allow-site" }).catch(() => {});
         hide();

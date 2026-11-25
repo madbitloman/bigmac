@@ -4,7 +4,8 @@
 // make-app.sh adds under another name and that publishes globalThis.PopupGuard here.
 //   - Hands the guard BigMac's settings over the private page channel.
 //   - Passes "blocked" notices to the background script (which counts them for BigMac).
-//   - In the top frame, shows "Pop-up blocked — Allow once / Always allow on this site".
+//   - In the top frame, shows "Pop-up blocked — Allow once". Always allowing a site is in the
+//     toolbar button (toolbar.html), which the page cannot reach.
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const Guard = globalThis.PopupGuard;
@@ -94,7 +95,7 @@
     toast = null;
   }
 
-  function showToast({ url, site }) {
+  function showToast({ url }) {
     hide();
     let where = "";
     try {
@@ -117,7 +118,8 @@
     const box = element("div", "toast");
     box.setAttribute("role", "status");
     const text = element("div", "text");
-    text.append(element("div", "title", "Pop-up blocked"), element("div", "detail", where ? `To ${where}` : "A new window from this page"));
+    text.append(element("div", "title", "Pop-up blocked"), element("div", "detail", where ? `To ${where}` : "A new window from this page"),
+      element("div", "detail", "More in the toolbar button"));
     box.append(text);
     if (opensSomewhere) {
       const once = element("button", "", "Allow once");
@@ -127,17 +129,6 @@
         hide();
       });
       box.append(once);
-    }
-    if (site) {
-      const always = element("button", "", "Always allow on this site");
-      always.title = `Adds ${site} to BigMac's allowed sites: nothing is blocked there, ads included.`;
-      always.addEventListener("click", () => {
-        settle();
-        if (opensSomewhere) window.open(url, "_blank", "noopener");
-        api.runtime.sendMessage({ type: "popup-allow-site" }).catch(() => {});
-        hide();
-      });
-      box.append(always);
     }
     const close = element("button", "close", "×");
     close.setAttribute("aria-label", "Dismiss");

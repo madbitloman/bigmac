@@ -17,7 +17,7 @@ A small, native Mac cleaner with an ad blocker, a network monitor and a security
 | **Smart Clean** | App caches, logs, Xcode and simulator junk, npm/pip/gradle/CocoaPods caches, Docker leftovers, the Trash, old downloads and large files. Risky items are marked *review* and never pre-selected. |
 | **Duplicates** | Byte-identical files: matched by size, then a 64 KB hash, then a full SHA-256. One copy is always kept. |
 | **Apps** | Size, last used and leftover support files. Uninstalls to the Trash. |
-| **Ad Blocking** | A Safari content blocker (EasyList, EasyPrivacy and built-in pop-up and cookie-notice lists, with element hiding), a YouTube ad skipper for Safari, and an optional system-wide block list in `/etc/hosts` for other browsers and apps. Allowed sites are never blocked. |
+| **Ad Blocking** | A Safari content blocker (EasyList, EasyPrivacy and built-in pop-up and cookie-notice lists, with element hiding), an optional Safari pop-up blocker that stops tabs and windows sites open without your click, a YouTube ad skipper for Safari, and an optional system-wide block list in `/etc/hosts` for other browsers and apps. Allowed sites are never blocked. |
 | **Network** | Who your apps talk to (`lsof`), with risk from the code signature, binary location and port. Take a single snapshot or watch live. |
 | **Security audit** | Read-only check for malware footholds: launch agents, cron, shell rc files, unsigned processes, proxy/DNS/root-certificate interception, profiles, remote-access tools, browser and system extensions, privacy grants, and Gatekeeper/SIP/FileVault/firewall posture. Matches known techniques (MITRE ATT&CK). Unwanted launch items can be removed fully: stopped, then moved to the Trash. |
 | **Menu bar** | A glance at CPU, memory and disk (sampled only while open), how much BigMac can free, and one-click Run, Scan and Snapshot. |
@@ -47,7 +47,7 @@ swift run                         # dev build
 swift run BigMac --selftest /tmp/bigmac-test
 ```
 
-`make-app.sh` also builds the two Safari extensions with `swiftc` (SwiftPM can't build app extensions) and embeds them in `Contents/PlugIns`. A plain `swift run` has no app bundle, so it runs without them.
+`make-app.sh` also builds the three Safari extensions with `swiftc` (SwiftPM can't build app extensions) and embeds them in `Contents/PlugIns`. A plain `swift run` has no app bundle, so it runs without them.
 
 To notarize, set `NOTARY_PROFILE` (a profile saved with `xcrun notarytool store-credentials`) or `APPLE_ID`, `APPLE_APP_PASSWORD` and `APPLE_TEAM_ID` before running `make-app.sh`.
 
@@ -69,7 +69,9 @@ Keys are stored in your Keychain on this Mac only, or read from `ANTHROPIC_API_K
 
 ## Ad blocking
 
-The two Safari extensions ship inside BigMac.app. Switch them on once in Safari: **Settings → Extensions**, then tick **BigMac Ad Blocker** and **BigMac YouTube Ad Skipper** (allow the second on youtube.com). BigMac's settings reach the blocker through a shared app group. The content blocker only hands Safari a rule list and never sees your pages. The YouTube skipper is a script that runs on youtube.com pages only, so Safari asks you to allow it there.
+Three Safari extensions ship inside BigMac.app. Switch them on once in Safari: **Settings → Extensions**, then tick **BigMac Ad Blocker**, and if you want them **BigMac Pop-up Blocker** and **BigMac YouTube Ad Skipper** (allow the last on youtube.com). BigMac's settings reach the extensions through a shared app group. The content blocker only hands Safari a rule list and never sees your pages. The YouTube skipper is a script that runs on youtube.com pages only, so Safari asks you to allow it there.
+
+**Pop-up blocker.** The content blocker already stops windows to known pop-up networks and EasyList's pop-up addresses. What it can't stop is a site's own script opening a tab on any click, an invisible link over the whole page, or a page that opens a tab and then turns itself into an ad. The pop-up blocker is a small script for that. It runs in each page and lets a new window open only when you pressed a link, button or other control and the window is that control's doing. Sign-in and payment windows (Google, Apple, Microsoft, GitHub, PayPal, Stripe) always open, and so do links you Cmd-click or middle-click. Turn it on in **Safari → Settings → Extensions → BigMac Pop-up Blocker**. Safari then asks for permission to **read and change web pages on all websites**: the script has to be in the page to see which clicks you made. It sends nothing anywhere and keeps no history; it only counts how many pop-ups it stopped, for the Ad Blocking pane. It follows BigMac's **Pop-ups** and **Strict pop-up blocking** switches and your allowed sites. When it blocks something it shows a small notice with **Allow once** and **Always allow on this site**, which adds the site to the allowed list (so nothing is blocked there, ads included). It needs Safari 18; catching a page that turns itself into an ad needs Safari 26.2. `Tests/PopupGuard` has test pages and a checklist. The script is an unmodified copy of the pop-up guard from the blocking engine; `Extensions/PopupBlocker/popup-guard.sha256` records which version, and the self-test checks it.
 
 **System-wide** adds about 78,000 ad and tracker servers to `/etc/hosts`, behind one admin prompt. BigMac edits only its own marked section and writes only `0.0.0.0 <name>` lines. Root checks the SHA-256 of the block BigMac prepared before installing it. Turning it off removes the section and leaves the rest of the file as it was. It blocks whole servers, not page elements. Browsers using their own secure DNS, and some VPNs, bypass it.
 

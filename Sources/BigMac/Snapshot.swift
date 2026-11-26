@@ -14,7 +14,7 @@ enum Snapshot {
         // The ad-blocking pane's one-time notice is remembered in a throwaway domain, never in BigMac's own preferences.
         let jev = JevSettings(useKeychain: false),  // a Keychain prompt would block headless runs
              junk = JunkModel(), duplicates = DuplicatesModel(), apps = AppsModel()
-        let network = NetworkModel(), audit = AuditModel(), stats = SystemStats(), adBlock = AdBlockModel(preferences: UserDefaults(suiteName: "bigmac-snapshot-\(UUID().uuidString)")!)
+        let network = NetworkModel(), audit = AuditModel(), stats = SystemStats(), adBlock = AdBlockModel(preferences: UserDefaults(suiteName: "com.bigmac.snapshot")!)
         audit.triageAfterScan = false
         if arguments.contains("demo") {
             Demo.fill(junk: junk, duplicates: duplicates, apps: apps, network: network, audit: audit)

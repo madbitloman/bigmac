@@ -29,7 +29,7 @@ rm -rf "$DEST" "$SUMS"
 if [[ ! -f "$SRC/manifest.json" ]]; then
   print -u2 ""
   print -u2 "warning: the Chrome and Firefox extension was not found at $SRC"
-  print -u2 "warning: BigMac will be built WITHOUT it (the Ad Blocking pane says so). Set BLOCKER_EXTENSION_DIR to its folder."
+  print -u2 "warning: BigMac will be built WITHOUT it (the Ad & Pop-up Blocking pane says so). Set BLOCKER_EXTENSION_DIR to its folder."
   print -u2 ""
   (( REQUIRE )) && exit 1
   exit 3

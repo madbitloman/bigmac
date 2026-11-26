@@ -58,7 +58,11 @@ struct AdBlockView: View {
         if !model.isEnabled {
             parts.append("Off")
         } else if model.linkedToSafari {
-            parts.append(model.safariBlocking ? "On in Safari" : "Not switched on in Safari yet")
+            switch safariValue.text {
+            case "On": parts.append("On in Safari")
+            case "Partly": parts.append("Partly on in Safari: one of its two extensions is off")
+            default: parts.append("Not switched on in Safari yet")
+            }
         }
         if model.hosts.installed { parts.append("\(model.hosts.entries.formatted()) servers blocked system-wide") }
         return parts.joined(separator: " · ")

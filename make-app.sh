@@ -20,6 +20,13 @@ if [[ ! -f Resources/AppIcon.icns || Resources/AppIcon.png -nt Resources/AppIcon
   iconutil -c icns "$ICONSET" -o Resources/AppIcon.icns
 fi
 
+# The blocking engine's parts (the engine, its filter lists and the pop-up guard) aren't in this
+# repository: scripts/fetch-blocker-sources.sh copies them at build time and lists their SHA-256 in build/blocker.sha256.
+# Without their source the app is built without ad blocking, and the Ad & Pop-up Blocking pane says so.
+scripts/fetch-blocker-sources.sh
+BLOCKER=0
+[[ -f build/blocker.sha256 ]] && BLOCKER=1
+
 swift build -c release
 APP=build/BigMac.app
 rm -rf "$APP"
@@ -52,16 +59,17 @@ appex() { # name dir sources...
   sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" "$dir/Info.plist" > "$out/Info.plist"
 }
 appex BigMacContentBlocker Extensions/ContentBlocker Extensions/ContentBlocker/*.swift Sources/BigMac/AdBlock/Shared/*.swift
-cp Extensions/Filters/*.json "$APP/Contents/PlugIns/BigMacContentBlocker.appex/Contents/Resources/"
+cp build/blocker/Filters/*.json "$APP/Contents/PlugIns/BigMacContentBlocker.appex/Contents/Resources/"
 # BigMac's one Safari web extension: the pop-up blocker and the YouTube ad skipper. It reads BigMac's settings
 # through the app group, so it shares the AdBlock code too. (Bundle id com.bigmac.app.PopupBlocker, kept from when
 # it was the pop-up blocker alone, so Safari keeps it switched on; see docs/safari-blocker-design.md.)
 appex BigMacPopupBlocker Extensions/PopupBlocker Extensions/PopupBlocker/*.swift Sources/BigMac/AdBlock/Shared/*.swift -framework SafariServices
 POPUPS="$APP/Contents/PlugIns/BigMacPopupBlocker.appex/Contents/Resources"
 cp Extensions/PopupBlocker/Resources/* "$POPUPS/"
-# The guard runs in the page's world and its relay needs the same rules in the isolated world; browsers
-# inject a file only once per frame, so the relay's copy goes in under a second name.
-cp Extensions/PopupBlocker/Resources/popup-guard.js "$POPUPS/popup-guard-rules.js"
+# The guard (from the build-time copy) runs in the page's world, and its relay needs the same rules in the isolated
+# world; browsers inject a file only once per frame, so the relay's copy goes in under a second name.
+cp build/blocker/popup-guard.js "$POPUPS/popup-guard.js"
+cp build/blocker/popup-guard.js "$POPUPS/popup-guard-rules.js"
 # Its icons are BigMac's own.
 for s in 48 128; do sips -z $s $s Resources/AppIcon.png --out "$POPUPS/icon-$s.png" >/dev/null; done
 # The YouTube ad skipper comes from the same build-time copy as the Chrome and Firefox extension.

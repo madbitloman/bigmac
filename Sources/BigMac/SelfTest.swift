@@ -47,7 +47,7 @@ enum SelfTest {
         check(!(groups.first?.files.contains { $0.lastPathComponent == "c.bin" } ?? true), "near-identical c.bin excluded")
 
         print("Ad blocking")
-        let filters = URL(filePath: FileManager.default.currentDirectoryPath).appending(path: "Extensions/Filters")
+        let filters = URL(filePath: FileManager.default.currentDirectoryPath).appending(path: "build/blocker/Filters")
         let catalog = FilterCatalog.load(from: (try? Data(contentsOf: filters.appending(path: "manifest.json"))) ?? Data())
         check(catalog.lists.count == 2, "filter manifest lists EasyList and EasyPrivacy (\(catalog.lists.map(\.id)))")
         var everything = BlockerSettings(enabledCategories: Set(BlockingCategory.allCases), allowedDomains: ["example.com"])
@@ -80,12 +80,12 @@ enum SelfTest {
               "pop-up networks are blocked as pop-up windows (resource-type popup)")
         check(popupRules.count > 2_000, "EasyList's $popup rules reach Safari as pop-up rules (\(popupRules.count))")
         let popupExtension = URL(filePath: FileManager.default.currentDirectoryPath).appending(path: "Extensions/PopupBlocker")
-        let guardSource = (try? Data(contentsOf: popupExtension.appending(path: "Resources/popup-guard.js"))) ?? Data()
+        let guardSource = (try? Data(contentsOf: checkoutURL.appending(path: "build/blocker/popup-guard.js"))) ?? Data()
         let guardHash = SHA256.hash(data: guardSource).map { String(format: "%02x", $0) }.joined()
-        let recordedHash = (try? String(contentsOf: popupExtension.appending(path: "popup-guard.sha256"), encoding: .utf8))?
-            .split(separator: " ").first.map(String.init)
+        let recordedHash = (try? String(contentsOf: checkoutURL.appending(path: "build/blocker.sha256"), encoding: .utf8))?
+            .split(separator: "\n").first { $0.hasSuffix("  build/blocker/popup-guard.js") }?.split(separator: " ").first.map(String.init)
         check(!guardSource.isEmpty && guardHash == recordedHash,
-              "popup-guard.js is the recorded copy of the blocking engine's guard (\(guardHash.prefix(12)))")
+              "the pop-up guard is the build-time copy listed in build/blocker.sha256 (\(guardHash.prefix(12)))")
         let guardText = String(decoding: guardSource, as: UTF8.self)
         let destinations = guardText.range(of: #"ALLOWED_DESTINATIONS = \[[^\]]*\]"#, options: .regularExpression).map {
             guardText[$0].matches(of: /"([^"]+)"/).map { String($0.1) }

@@ -97,14 +97,14 @@ final class AdBlockModel {
         preferences.set(2, forKey: Self.layoutKey)
     }
 
-    /// The manifest of the lists inside the content blocker, or the checkout's copy in a debug run.
+    /// The manifest of the lists inside the content blocker, or the build-time copy in a debug run.
     private static func loadCatalog() -> FilterCatalog {
         if let plugins = Bundle.main.builtInPlugInsURL,
            let appex = Bundle(url: plugins.appending(path: "BigMacContentBlocker.appex")) {
             let catalog = FilterCatalog.load(from: appex)
             if !catalog.lists.isEmpty { return catalog }
         }
-        let local = URL(filePath: FileManager.default.currentDirectoryPath).appending(path: "Extensions/Filters/manifest.json")
+        let local = URL(filePath: FileManager.default.currentDirectoryPath).appending(path: "build/blocker/Filters/manifest.json")
         return (try? Data(contentsOf: local)).map(FilterCatalog.load(from:)) ?? .empty
     }
 

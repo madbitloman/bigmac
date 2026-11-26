@@ -1,0 +1,28 @@
+:root {
+  color-scheme: light dark;
+  --text: #1d1d1f;
+  --muted: rgb(0 0 0 / 0.6);
+  --line: rgb(0 0 0 / 0.1);
+  --accent: #0a84ff;
+  --bg: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --text: #f5f5f7; --muted: rgb(255 255 255 / 0.65); --line: rgb(255 255 255 / 0.14); --bg: #1e1e1e; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; width: 300px; background: var(--bg); color: var(--text); font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+main { padding: 12px 14px 14px; }
+header { display: flex; align-items: center; gap: 8px; }
+h1 { margin: 0; font-size: 13px; font-weight: 600; }
+p { margin: 0; }
+.site { margin-top: 10px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.count { color: var(--muted); }
+.row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); cursor: pointer;
+}
+.row[hidden] { display: none; }
+.row span { overflow-wrap: anywhere; }
+input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.note, .status { margin-top: 8px; color: var(--muted); font-size: 12px; }
+.status:empty, .note:empty { display: none; }

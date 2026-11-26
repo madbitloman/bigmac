@@ -7,7 +7,12 @@
     "48": "icon-48.png",
     "128": "icon-128.png"
   },
-  "permissions": ["nativeMessaging"],
+  "action": {
+    "default_title": "BigMac Pop-up Blocker",
+    "default_popup": "toolbar.html",
+    "default_icon": { "48": "icon-48.png", "128": "icon-128.png" }
+  },
+  "permissions": ["nativeMessaging", "storage"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "scripts": ["background.js"],

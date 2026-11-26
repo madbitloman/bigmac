@@ -4,7 +4,8 @@
 // make-app.sh adds under another name and that publishes globalThis.PopupGuard here.
 //   - Hands the guard BigMac's settings over the private page channel.
 //   - Passes "blocked" notices to the background script (which counts them for BigMac).
-//   - In the top frame, shows "Pop-up blocked — Allow once / Always allow on this site".
+//   - In the top frame, shows "Pop-up blocked — Allow once". Always allowing a site is in the
+//     toolbar button (toolbar.html), which the page cannot reach.
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const Guard = globalThis.PopupGuard;
@@ -40,8 +41,26 @@
   });
 
   // ---------------------------------------------------------------- the notice
+  // The notice's host element lives in the page, so the page can restyle, move or cover it. The
+  // notice therefore offers only Allow once, which opens the one blocked window, and takes a click
+  // only when it is real (isTrusted), the notice has been on screen as the relay placed it for at
+  // least MIN_VISIBLE_MS, nothing has faded or moved it, and the click point hits the notice itself.
+  // Anything that touches the host restores it and restarts that clock.
+  // Keyboard: Enter or Space on the focused button counts too (a page can't move focus into the
+  // closed shadow root); the point checked is then the button's centre.
 
-  let toast = null;
+  const MIN_VISIBLE_MS = 500;
+  const MAX_RESTORES = 20;
+  const MARGIN = 16;
+  const HOST_CSS = [
+    "all: initial", "position: fixed", "right: 16px", "bottom: 16px", "top: auto", "left: auto",
+    "display: block", "width: max-content", "max-width: min(420px, calc(100vw - 32px))", "height: auto",
+    "margin: 0", "padding: 0", "border: 0", "z-index: 2147483647", "opacity: 1", "visibility: visible",
+    "transform: none", "filter: none", "clip-path: none", "pointer-events: auto", "overflow: visible",
+  ].map((rule) => `${rule} !important`).join("; ");
+  const canPopover = typeof HTMLElement.prototype.showPopover === "function";
+
+  let notice = null;
   let hideTimer = 0;
   // The notice sits in the page, so a click on its buttons also reaches the page's own click
   // handlers; on a click-anywhere site that is one more blocked attempt. Don't show that one.
@@ -53,9 +72,8 @@
   const STYLE = `
     :host { all: initial; }
     .toast {
-      position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
       display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
-      max-width: min(420px, calc(100vw - 32px)); box-sizing: border-box;
+      box-sizing: border-box; width: 100%;
       padding: 10px 12px; border-radius: 12px;
       background: rgb(28 28 30 / 0.94); color: #fff;
       font: 13px/1.35 -apple-system, system-ui, sans-serif;
@@ -90,11 +108,114 @@
 
   function hide() {
     clearTimeout(hideTimer);
-    toast?.remove();
-    toast = null;
+    if (!notice) return;
+    const { host, observer, listeners } = notice;
+    notice = null;
+    observer.disconnect();
+    for (const [target, type, listener] of listeners) target.removeEventListener(type, listener, true);
+    host.remove();
   }
 
-  function showToast({ url, site }) {
+  // ------------------------------------------------ keeping the host where the relay put it
+
+  function raise(host) {
+    if (!canPopover || !host.isConnected) return;
+    try {
+      if (host.matches(":popover-open")) host.hidePopover();
+      host.showPopover();
+    } catch {
+      // Not in the document, or the page swapped the attribute; the next restore tries again.
+    }
+  }
+
+  function place() {
+    const { host, observer } = notice;
+    for (const name of host.getAttributeNames()) {
+      if (name !== "style" && name !== "popover") host.removeAttribute(name);
+    }
+    host.style.cssText = HOST_CSS;
+    if (canPopover && host.getAttribute("popover") !== "manual") host.setAttribute("popover", "manual");
+    const root = document.documentElement;
+    if (root && host.parentNode !== root) root.append(host);
+    raise(host);
+    notice.css = host.style.cssText;
+    notice.shownAt = Infinity;
+    // Our own changes are not the page's.
+    observer.takeRecords();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!notice || notice.host !== host) return;
+      notice.rect = host.getBoundingClientRect();
+      notice.shownAt = performance.now();
+    }));
+  }
+
+  function tampered() {
+    const { host } = notice;
+    if (!host.isConnected || host.parentNode !== document.documentElement) return true;
+    if (host.style.cssText !== notice.css) return true;
+    if (host.getAttributeNames().some((name) => name !== "style" && name !== "popover")) return true;
+    return canPopover && (host.getAttribute("popover") !== "manual" || !host.matches(":popover-open"));
+  }
+
+  function restore() {
+    if (!notice) return;
+    notice.restores += 1;
+    if (notice.restores > MAX_RESTORES) {
+      hide();
+      return;
+    }
+    place();
+  }
+
+  // ------------------------------------------------ the click
+
+  function near(a, b) {
+    return Math.abs(a - b) <= 1;
+  }
+
+  function looksAsPlaced() {
+    const { host, rect: placed } = notice;
+    if (!placed || tampered()) return false;
+    const rect = host.getBoundingClientRect();
+    if (!near(rect.left, placed.left) || !near(rect.top, placed.top) || !near(rect.width, placed.width) || !near(rect.height, placed.height)) {
+      return false;
+    }
+    // Bottom-right corner, fully on screen.
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    if (rect.left < 0 || rect.top < 0 || rect.right > width || rect.bottom > height) return false;
+    if (rect.right < width - MARGIN - 40 || rect.bottom < height - MARGIN - 40) return false;
+    for (let node = host; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.opacity !== "1" || style.visibility !== "visible" || style.display === "none") return false;
+      if (style.filter !== "none" || style.clipPath !== "none") return false;
+      const mask = style.maskImage ?? style.webkitMaskImage;
+      if (mask && mask !== "none") return false;
+      if (node !== host && style.transform !== "none") return false;
+    }
+    return true;
+  }
+
+  function trustedClick(event, button, shadow) {
+    if (!notice || !event.isTrusted) return false;
+    if (document.visibilityState !== "visible") return false;
+    if (performance.now() - notice.shownAt < MIN_VISIBLE_MS) return false;
+    if (!looksAsPlaced()) return false;
+    const box = button.getBoundingClientRect();
+    let x = event.clientX;
+    let y = event.clientY;
+    if (event.detail === 0 && x === 0 && y === 0) {
+      if (shadow.activeElement !== button) return false;
+      x = box.left + box.width / 2;
+      y = box.top + box.height / 2;
+    }
+    if (x < box.left || x > box.right || y < box.top || y > box.bottom) return false;
+    return document.elementFromPoint(x, y) === notice.host;
+  }
+
+  // ------------------------------------------------ showing it
+
+  function showToast({ url }) {
     hide();
     let where = "";
     try {
@@ -105,9 +226,6 @@
     const opensSomewhere = /^https?:/i.test(url ?? "");
 
     const host = element("div");
-    host.style.setProperty("all", "initial", "important");
-    host.style.setProperty("position", "fixed", "important");
-    host.style.setProperty("z-index", "2147483647", "important");
     const shadow = host.attachShadow({ mode: "closed" });
     // A constructed stylesheet, which a page's Content Security Policy does not block.
     const sheet = new CSSStyleSheet();
@@ -117,27 +235,18 @@
     const box = element("div", "toast");
     box.setAttribute("role", "status");
     const text = element("div", "text");
-    text.append(element("div", "title", "Pop-up blocked"), element("div", "detail", where ? `To ${where}` : "A new window from this page"));
+    text.append(element("div", "title", "Pop-up blocked"), element("div", "detail", where ? `To ${where}` : "A new window from this page"),
+      element("div", "detail", "More in the toolbar button"));
     box.append(text);
     if (opensSomewhere) {
       const once = element("button", "", "Allow once");
-      once.addEventListener("click", () => {
+      once.addEventListener("click", (event) => {
+        if (!trustedClick(event, once, shadow)) return;
         settle();
         window.open(url, "_blank", "noopener");
         hide();
       });
       box.append(once);
-    }
-    if (site) {
-      const always = element("button", "", "Always allow on this site");
-      always.title = `Adds ${site} to BigMac's allowed sites: nothing is blocked there, ads included.`;
-      always.addEventListener("click", () => {
-        settle();
-        if (opensSomewhere) window.open(url, "_blank", "noopener");
-        api.runtime.sendMessage({ type: "popup-allow-site" }).catch(() => {});
-        hide();
-      });
-      box.append(always);
     }
     const close = element("button", "close", "×");
     close.setAttribute("aria-label", "Dismiss");
@@ -147,10 +256,36 @@
 
     box.addEventListener("mouseenter", () => clearTimeout(hideTimer));
     box.addEventListener("mouseleave", () => {
+      clearTimeout(hideTimer);
       hideTimer = setTimeout(hide, 4000);
     });
-    (document.body ?? document.documentElement).append(host);
-    toast = host;
+
+    const observer = new MutationObserver(() => {
+      if (notice?.host === host && tampered()) restore();
+    });
+    // Another element entering the top layer (a popover, a dialog, full screen) could sit over the
+    // notice: put the notice back on top and restart the clock.
+    const onTopLayer = (event) => {
+      if (!notice || event.target === host) {
+        if (notice && tampered()) restore();
+        return;
+      }
+      if (event.type !== "toggle" || event.newState === "open") place();
+    };
+    const onResize = () => notice && place();
+    const listeners = [
+      [window, "toggle", onTopLayer],
+      [document, "fullscreenchange", onTopLayer],
+      [document, "webkitfullscreenchange", onTopLayer],
+      [window, "resize", onResize],
+      [document, "visibilitychange", onResize],
+    ];
+    for (const [target, type, listener] of listeners) target.addEventListener(type, listener, true);
+
+    notice = { host, observer, listeners, css: "", rect: null, shownAt: Infinity, restores: 0 };
+    place();
+    observer.observe(document, { childList: true, subtree: true });
+    observer.observe(host, { attributes: true });
     hideTimer = setTimeout(hide, 10000);
   }
 })();

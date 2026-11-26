@@ -40,7 +40,8 @@ enum HostsBlocker {
         for name in BlockerEngine.hostsDomains {
             names.insert(name.lowercased())
         }
-        let allowed = allowed.compactMap(BlockerEngine.normalize)
+        // Allowed sites are saved as bare lowercase domains already; anything else here is ignored.
+        let allowed = allowed.map { $0.lowercased() }.filter(isServerName)
         return names.filter { name in
             isServerName(name) && !allowed.contains { name == $0 || name.hasSuffix("." + $0) }
         }.sorted()

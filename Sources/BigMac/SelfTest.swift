@@ -188,7 +188,7 @@ enum SelfTest {
                     return parts.count == 2 ? (String(parts[0]), parts[1].trimmingCharacters(in: .whitespaces)) : nil
                 }
             let engineFiles = (try? FileManager.default.contentsOfDirectory(atPath: checkoutURL.appending(path: "Sources/BigMac/AdBlock/Engine").path)) ?? []
-            let unlisted = engineFiles.filter { $0 != "BlockerEngine.swift" && !listed.contains { $0.1 == "Sources/BigMac/AdBlock/Engine/\($0)" } }
+            let unlisted = engineFiles.filter { name in name != "BlockerEngine.swift" && !listed.contains { $0.1 == "Sources/BigMac/AdBlock/Engine/\(name)" } }
             let changed = listed.filter { sha(checkoutURL.appending(path: $0.1)) != $0.0 }.map(\.1)
             check(listed.count > 40 && changed.isEmpty && unlisted.isEmpty,
                   "the \(listed.count) copies match build/blocker.sha256\(changed.isEmpty && unlisted.isEmpty ? "" : ": changed \(changed.prefix(3)), unlisted \(unlisted)")")

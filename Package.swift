@@ -3,9 +3,9 @@ import Foundation
 import PackageDescription
 
 // Ad blocking is built on an engine that isn't in this repository. scripts/fetch-blocker-sources.sh sets up
-// Sources/BigMac/AdBlock/Engine with it, or with a stand-in when its source isn't on this Mac (see README, Building).
+// Sources/BigMac/AdBlock/Engine with it, or with a stand-in when its source isn't on this Mac (see README, Build from source).
 if !FileManager.default.fileExists(atPath: Context.packageDirectory + "/Sources/BigMac/AdBlock/Engine/BlockerEngine.swift") {
-    fatalError("\n\nRun scripts/fetch-blocker-sources.sh first: Sources/BigMac/AdBlock/Engine is missing (see README, Building).\n")
+    fatalError("\n\nRun scripts/fetch-blocker-sources.sh first: Sources/BigMac/AdBlock/Engine is missing (see README, Build from source).\n")
 }
 
 let package = Package(

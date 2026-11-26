@@ -1,18 +1,20 @@
 # Pop-up blocker test pages
 
 Local pages for the pop-up part of BigMac's Safari web extension, BigMac Pop-up and YouTube Blocker
-(`Extensions/PopupBlocker`). Each page is one case and
+(`Extensions/PopupBlocker`). They come with the pop-up guard from the blocking engine and aren't in this
+repository: `scripts/fetch-blocker-sources.sh` copies them into `build/blocker/popup-guard-fixtures` (without
+the guard's source there are none, and this checklist can't be run). Each page is one case and
 says what should happen. They open nothing outside this machine except the stand-ins for
 sign-in and payment windows (accounts.google.com, paypal.com, hooks.stripe.com), which open
 the real address in a pop-up and are only loaded, never used. Serve them on 127.0.0.1;
 links to `localhost` count as another site:
 
 ```sh
-python3 -m http.server 8000 --bind 127.0.0.1 --directory Tests/PopupGuard/fixtures
+python3 -m http.server 8000 --bind 127.0.0.1 --directory build/blocker/popup-guard-fixtures
 ```
 
 `swift run BigMac --selftest <dir>` checks the parts that need no browser: the guard is the
-recorded copy of the blocking engine's, its sign-in list matches `FilterLists.swift`, the
+build-time copy listed in `build/blocker.sha256`, its sign-in list matches the content blocker's, the
 extension's manifest (including the toolbar button's page), which site names the native handler
 accepts, and the pop-up rules in the Safari rule list. The guard's rules themselves are tested in
 the blocking engine (unit tests, WebKit, and Chromium end to end).

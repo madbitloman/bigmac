@@ -14,7 +14,7 @@ struct AdBlockView: View {
         if model.included { pane } else { notIncluded }
     }
 
-    /// A build without the blocking engine (a copy of the repository on its own; see README, Building).
+    /// A build without the blocking engine (a copy of the repository on its own; see README, Build from source).
     private var notIncluded: some View {
         PaneView(title: "Ad & Pop-up Blocking", status: "Not included in this build") {
             EmptyView()

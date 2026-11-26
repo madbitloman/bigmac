@@ -31,7 +31,7 @@ WebKit's source (WebKit/WebKit `main`, November 2026) answers most of it:
 
 | | Rules |
 |---|---|
-| BigMac's content blocker lists (`Extensions/Filters`, all categories) | 115,521 rules, compiled by WebKit in the self-test |
+| BigMac's content blocker lists (`build/blocker/Filters`, all categories) | 115,521 rules, compiled by WebKit in the self-test |
 | of which element hiding (`css-display-none`) | 5,705 |
 | of which pop-up windows (`resource-type: popup`) | 2,956 |
 | of which limited to or excluding sites (`if-domain` / `unless-domain`) | 6,513 |

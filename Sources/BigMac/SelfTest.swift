@@ -221,7 +221,7 @@ enum SelfTest {
               "git tracks \(tracked.count) files, none from the build folders or the engine folder")
         if let blockerSource {
             // Every file tracked at HEAD against every file in the source's whole history, by git blob hash.
-            let checker = checkoutURL.appending(path: "scripts/check-no-private-copies.sh")
+            let checker = checkoutURL.appending(path: "scripts/check-no-copied-sources.sh")
             let report = Shell.run("/usr/bin/env", ["BLOCKER_SOURCE_DIR=\(blockerSource.path)", checker.path], timeout: 120, anyStatus: true)
             let clean = report?.split(separator: "\n").contains("matches: 0") == true
             check(clean, "no file tracked at HEAD is a copy of any version of a file in \(blockerSource.lastPathComponent)\(clean ? "" : ": \(report?.prefix(300) ?? "the check didn't run")")")

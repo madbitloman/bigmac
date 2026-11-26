@@ -4,8 +4,8 @@
 #   ${BLOCKER_SOURCE_DIR:-<this checkout's sibling folder>/adblocker}
 # Run it before every push. Its files reach BigMac only through scripts/fetch-blocker-sources.sh, at build time.
 #
-#   scripts/check-no-private-copies.sh                     # every file tracked at HEAD
-#   scripts/check-no-private-copies.sh origin/main..HEAD   # every file added or changed by the commits in a range
+#   scripts/check-no-copied-sources.sh                     # every file tracked at HEAD
+#   scripts/check-no-copied-sources.sh origin/main..HEAD   # every file added or changed by the commits in a range
 #
 # Prints one line per copy ("<commit> <path here> = <path there>") and then "matches: <count>".
 # Exit status: 0 no copies, 1 copies found, 2 the engine repository's git checkout isn't there.

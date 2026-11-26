@@ -112,8 +112,10 @@ async function setAllowed(tabId, allow) {
   if (!allow && before.via) await native({ type: "disallow", site: before.via });
   const after = await toolbarState(tabId);
   if (after.allowed !== before.allowed) {
-    // Every frame of the tab re-reads its settings, so the guard follows without a reload.
-    api.tabs.sendMessage(tabId, { type: "popup-guard-reload" }).catch(() => {});
+    // The guard takes only one loosening setting per page, so allowing a site needs a reload.
+    // Removing one only tightens, so every frame re-reads its settings in place.
+    if (after.allowed) api.tabs.reload(tabId).catch(() => {});
+    else api.tabs.sendMessage(tabId, { type: "popup-guard-reload" }).catch(() => {});
   }
   return { ...after, changed: after.allowed === allow };
 }

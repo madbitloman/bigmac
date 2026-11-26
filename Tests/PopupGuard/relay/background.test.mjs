@@ -13,6 +13,7 @@ const EXT = "safari-web-extension://abc/";
 function load({ allowed = [], tabs = {} } = {}) {
   const native = [];
   const tabMessages = [];
+  const reloads = [];
   let listener = null;
   const store = { popups: true, strict: false, allowed: [...allowed], linked: true };
   const browser = {
@@ -31,6 +32,7 @@ function load({ allowed = [], tabs = {} } = {}) {
     tabs: {
       get: async (id) => tabs[id] ?? { id },
       sendMessage: async (id, message) => { tabMessages.push({ id, message }); },
+      reload: async (id) => { reloads.push(id); },
       onRemoved: { addListener() {} },
     },
   };
@@ -39,7 +41,7 @@ function load({ allowed = [], tabs = {} } = {}) {
     const async = listener(message, sender, resolve);
     if (!async) resolve(undefined);
   });
-  return { send, native, tabMessages, store };
+  return { send, native, tabMessages, reloads, store };
 }
 
 const toolbar = { id: "bigmac", url: EXT + "toolbar.html" };
@@ -81,7 +83,7 @@ await test("the toolbar page allows the tab's own site, whatever the message say
   const allows = bg.native.filter((m) => m.type === "allow");
   expect(allows.length === 1 && allows[0].site === "example.com", `native got ${JSON.stringify(allows)}`);
   expect(state.allowed && state.changed && state.site === "example.com", `state ${JSON.stringify(state)}`);
-  expect(bg.tabMessages.some((t) => t.id === 7 && t.message.type === "popup-guard-reload"), "the tab was not told to re-read its settings");
+  expect(bg.reloads.includes(7), "the tab was not reloaded, so the guard would keep blocking until the next visit");
 });
 
 await test("switching off removes the entry that covers the site", async () => {
@@ -91,6 +93,8 @@ await test("switching off removes the entry that covers the site", async () => {
   const after = await bg.send({ type: "toolbar-allow", tabId: 7, allow: false }, toolbar);
   expect(bg.native.some((m) => m.type === "disallow" && m.site === "example.com"), `native got ${JSON.stringify(bg.native)}`);
   expect(!after.allowed && after.changed, `state ${JSON.stringify(after)}`);
+  expect(bg.tabMessages.some((t) => t.id === 7 && t.message.type === "popup-guard-reload") && !bg.reloads.length,
+    "switching off should re-read settings in place, without a reload");
 });
 
 await test("an address or a non-web page is never sent to be allowed", async () => {

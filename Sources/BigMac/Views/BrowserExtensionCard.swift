@@ -13,7 +13,7 @@ struct BrowserExtensionCard: View {
             if let bundled = model.browserExtension {
                 CardRows {
                     SettingRow(title: bundled.name,
-                               detail: "The same ad, tracker and pop-up blocking for Chrome, Brave, Edge, Arc and Firefox. It's the blocking engine, and keeps its own settings under its toolbar button.") {
+                               detail: "Ad, tracker and pop-up blocking for Chrome, Brave, Edge, Arc and Firefox. It keeps its own settings under its toolbar button.") {
                         Button { model.showBrowserExtension() } label: { ActionLabel("Show Extension in Finder", symbol: "folder") }
                             .buttonStyle(.ghost)
                     }

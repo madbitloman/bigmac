@@ -7,13 +7,17 @@ struct AdBlockView: View {
     @State private var newSite = ""
     @State private var siteRejected = false
     @State private var confirmSystemWide: Bool?
+    /// For snapshots: start scrolled to a section ("browsers").
+    var scrollTo: String?
 
     var body: some View {
         PaneView(title: "Ad & Pop-up Blocking", status: status, busy: model.hostsBusy) {
+            Text(model.isEnabled ? "Blocking on" : "Blocking off").font(Theme.body).foregroundStyle(Theme.secondary)
             Toggle("Blocking", isOn: Binding(get: { model.isEnabled }, set: { model.setEnabled($0) }))
                 .toggleStyle(.switch).labelsHidden().controlSize(.large)
                 .help(model.isEnabled ? "Turn off BigMac's blocking in Safari" : "Turn on BigMac's blocking in Safari")
         } content: {
+            ScrollViewReader { proxy in
             CardColumn {
                 if let message = model.message {
                     Callout(symbol: "exclamationmark.triangle", text: message, actionTitle: "Dismiss") { model.message = nil }
@@ -25,12 +29,14 @@ struct AdBlockView: View {
                 overview
                 categories
                 allowed
-                SectionHeader("Browsers")
+                SectionHeader("Browsers").id("browsers")
                 safari
                 BrowserExtensionCard()
                 SectionHeader("Advanced")
                 systemWide
                 credits
+            }
+            .onAppear { if let scrollTo { proxy.scrollTo(scrollTo, anchor: .top) } }
             }
         }
         .task { await model.refresh() }

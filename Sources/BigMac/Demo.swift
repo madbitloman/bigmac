@@ -6,6 +6,7 @@ import Foundation
 enum Demo {
     /// Safari's answers and the browsers on a made-up Mac: the content blocker on, the web extension still off.
     static func fill(adBlock: AdBlockModel) {
+        adBlock.demo = true
         adBlock.blockerEnabled = true
         adBlock.webExtensionEnabled = false
         adBlock.blockedPopups = 37

@@ -10,6 +10,8 @@ enum Pane: String, CaseIterable, Identifiable {
     case audit = "Security"
 
     var id: String { rawValue }
+    /// The sidebar's narrower name.
+    var shortTitle: String { self == .adBlock ? "Ads & Pop-ups" : rawValue }
     var symbol: String {
         switch self {
         case .overview: "gauge.with.dots.needle.33percent"
@@ -104,7 +106,7 @@ private struct Sidebar: View {
     }
 
     private func item(_ p: Pane) -> some View {
-        Label(p.rawValue, systemImage: p.symbol)
+        Label(p.shortTitle, systemImage: p.symbol)
             .font(.body)
             .badge(badge(p))
             .tag(p)

@@ -182,7 +182,11 @@ final class AdBlockModel {
 
     // MARK: State
 
+    /// Set by `--snapshot … demo`: keep the made-up Safari state and browsers instead of asking this Mac.
+    var demo = false
+
     func refresh() async {
+        guard !demo else { return }
         reloadSettings()
         if linkedToSafari {
             blockerEnabled = try? await SFContentBlockerManager.stateOfContentBlocker(withIdentifier: RuleStore.contentBlockerIdentifier).isEnabled

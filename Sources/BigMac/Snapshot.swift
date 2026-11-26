@@ -70,6 +70,8 @@ enum Snapshot {
             window.orderOut(nil)
         }
         for pane in Pane.allCases { await window(pane.rawValue.replacingOccurrences(of: " ", with: "-"), ContentView(initial: pane)) }
+        // The lower half of the Ad & Pop-up Blocking pane: the browsers and the system-wide list.
+        await window("Ad-&-Pop-up-Blocking-browsers", AdBlockView(scrollTo: "browsers"), width: 900, height: 1000)
         await window("settings", SettingsView(), width: 620, height: 520)
         await window("menubar", MenuBarPanel().frame(width: 400), width: 400, height: nil)
         exit(0)

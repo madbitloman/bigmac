@@ -1,5 +1,5 @@
-// BigMac Pop-up Blocker, background: BigMac's settings for the page guards, what to do when one
-// blocks something, and the toolbar button's page (toolbar.html). Settings come from the app
+// BigMac Pop-up and YouTube Blocker, background: BigMac's settings for the page guards, what to do
+// when one blocks something, the YouTube ad skipper, and the toolbar button's page (toolbar.html). Settings come from the app
 // through the native handler (SafariWebExtensionHandler.swift), which reads and writes them in
 // BigMac's shared app group.
 const api = globalThis.browser ?? globalThis.chrome;
@@ -18,7 +18,7 @@ async function settings(fresh = false) {
   } catch {
     value = null;
   }
-  value ??= { popups: true, strict: false, allowed: [] };
+  value ??= { popups: true, strict: false, youtube: true, allowed: [] };
   cached = { time: Date.now(), value };
   return value;
 }
@@ -80,6 +80,18 @@ api.tabs.onRemoved?.addListener((tabId) => {
   session?.remove(key).catch(() => {});
 });
 
+// ------------------------------------------------------------ YouTube
+
+// The skipper (youtube.js, youtube.css) comes with the blocking engine, copied in at build time.
+// A BigMac without it still answers, and the injection simply fails.
+async function injectYouTube(tabId, frameId) {
+  const target = { tabId, frameIds: [frameId] };
+  await Promise.all([
+    api.scripting.insertCSS({ target, files: ["youtube.css"] }),
+    api.scripting.executeScript({ target, files: ["youtube.js"] }),
+  ]).catch(() => {});
+}
+
 // ------------------------------------------------------------ the toolbar button's page
 
 // Only the extension's own page may change the allowed list. Content scripts always come with a tab.
@@ -129,6 +141,16 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ enabled, strict: enabled && value.strict === true });
       }, () => sendResponse(null));
       return true;
+    case "youtube-config": {
+      // youtube-loader.js asks from each youtube.com frame; the skipper goes in only where it's wanted.
+      if (!sender.tab || !Number.isInteger(sender.frameId)) return false;
+      settings().then(async (value) => {
+        const enabled = value.youtube !== false && !allowedEntry(value, siteOf(pageUrl));
+        if (enabled) await injectYouTube(sender.tab.id, sender.frameId);
+        sendResponse({ enabled });
+      }, () => sendResponse(null));
+      return true;
+    }
     case "popup-blocked": {
       if (!sender.tab || typeof message.url !== "string") return false;
       const site = siteOf(pageUrl);

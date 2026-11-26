@@ -112,7 +112,7 @@ struct OverviewView: View {
     }
 
     private var adBlockCard: some View {
-        let on = adBlock.blockerEnabled == true
+        let on = adBlock.safariBlocking
         return ToolCard(pane: .adBlock, open: open,
                         value: on ? "On in Safari" : "Off in Safari",
                         color: on ? Theme.green : Theme.tertiary,

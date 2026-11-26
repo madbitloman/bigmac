@@ -53,15 +53,23 @@ appex() { # name dir sources...
 }
 appex BigMacContentBlocker Extensions/ContentBlocker Extensions/ContentBlocker/*.swift Sources/BigMac/AdBlock/Shared/*.swift
 cp Extensions/Filters/*.json "$APP/Contents/PlugIns/BigMacContentBlocker.appex/Contents/Resources/"
-appex BigMacYouTube Extensions/YouTube Extensions/YouTube/*.swift -framework SafariServices
-cp Extensions/YouTube/Resources/* "$APP/Contents/PlugIns/BigMacYouTube.appex/Contents/Resources/"
-# The pop-up blocker reads BigMac's settings through the app group, so it shares the AdBlock code too.
+# BigMac's one Safari web extension: the pop-up blocker and the YouTube ad skipper. It reads BigMac's settings
+# through the app group, so it shares the AdBlock code too. (Bundle id com.bigmac.app.PopupBlocker, kept from when
+# it was the pop-up blocker alone, so Safari keeps it switched on; see docs/safari-blocker-design.md.)
 appex BigMacPopupBlocker Extensions/PopupBlocker Extensions/PopupBlocker/*.swift Sources/BigMac/AdBlock/Shared/*.swift -framework SafariServices
 POPUPS="$APP/Contents/PlugIns/BigMacPopupBlocker.appex/Contents/Resources"
 cp Extensions/PopupBlocker/Resources/* "$POPUPS/"
 # The guard runs in the page's world and its relay needs the same rules in the isolated world; browsers
 # inject a file only once per frame, so the relay's copy goes in under a second name.
 cp Extensions/PopupBlocker/Resources/popup-guard.js "$POPUPS/popup-guard-rules.js"
+# Its icons are BigMac's own.
+for s in 48 128; do sips -z $s $s Resources/AppIcon.png --out "$POPUPS/icon-$s.png" >/dev/null; done
+# The YouTube ad skipper comes from the same build-time copy as the Chrome and Firefox extension.
+if (( BROWSER_EXT )) && [[ -f build/BrowserExtension/youtube.js && -f build/BrowserExtension/youtube.css ]]; then
+  cp build/BrowserExtension/youtube.js build/BrowserExtension/youtube.css "$POPUPS/"
+else
+  print -u2 "warning: built WITHOUT the YouTube ad skipper (it comes with the Chrome and Firefox extension's source)"
+fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -93,7 +101,6 @@ sign() { # path entitlements
   fi
 }
 sign "$APP/Contents/PlugIns/BigMacContentBlocker.appex" Extensions/ContentBlocker/Extension.entitlements
-sign "$APP/Contents/PlugIns/BigMacYouTube.appex" Extensions/YouTube/Extension.entitlements
 sign "$APP/Contents/PlugIns/BigMacPopupBlocker.appex" Extensions/PopupBlocker/Extension.entitlements
 sign "$APP" Resources/BigMac.entitlements
 codesign --verify --strict --deep --verbose=2 "$APP"

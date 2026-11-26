@@ -1,17 +1,17 @@
 import Foundation
 import SafariServices
 
-/// The pop-up blocker's native side. Its JavaScript (Resources/background.js) asks here for BigMac's
-/// settings, which live in the shared app group, so the blocker follows the same "Pop-ups" and
-/// "Strict pop-up blocking" switches and the same allowed sites as the content blocker.
+/// The native side of BigMac's Safari web extension (pop-ups and YouTube). Its JavaScript (Resources/background.js) asks here for BigMac's
+/// settings, which live in the shared app group, so the extension follows the same master switch, the
+/// "Pop-ups", "Strict pop-up blocking" and "YouTube" switches and the same allowed sites as the content blocker.
 ///
 /// Messages ({"type": ...}):
-///   "settings"            -> {"popups", "strict", "allowed", "linked"}
+///   "settings"            -> {"popups", "strict", "youtube", "allowed", "linked"}
 ///   "allow", "site"       adds the site to the allowed list (the content blocker reloads too), then as "settings"
 ///   "disallow", "site"    removes that entry from the allowed list (the content blocker reloads too), then as "settings"
 /// Only the toolbar button's page asks for "allow" and "disallow" (background.js checks the sender).
 /// "site" must be a bare domain (DomainNormalizer.siteName); anything else changes nothing.
-///   "blocked"             counts one blocked pop-up for BigMac's Ad Blocking pane, then as "settings"
+///   "blocked"             counts one blocked pop-up for BigMac's Ad & Pop-up Blocking pane, then as "settings"
 @objc(SafariWebExtensionHandler)
 final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     func beginRequest(with context: NSExtensionContext) {
@@ -48,8 +48,9 @@ enum PopupBlockerSettings {
             break
         }
         return [
-            "popups": settings.enabledCategories.contains(.popups),
-            "strict": settings.enabledCategories.contains(.strictPopups),
+            "popups": settings.activeCategories.contains(.popups),
+            "strict": settings.activeCategories.contains(.strictPopups),
+            "youtube": settings.activeCategories.contains(.youtube),
             "allowed": settings.allowedDomains,
             "linked": store != nil,
         ]

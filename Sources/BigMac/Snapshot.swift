@@ -17,6 +17,7 @@ enum Snapshot {
         audit.triageAfterScan = false
         if arguments.contains("demo") {
             Demo.fill(junk: junk, duplicates: duplicates, apps: apps, network: network, audit: audit)
+            Demo.fill(adBlock: adBlock)
         } else {
             async let a: Void = audit.run()
             async let j: Void = junk.scan()

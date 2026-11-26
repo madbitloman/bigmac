@@ -5,7 +5,7 @@ enum Pane: String, CaseIterable, Identifiable {
     case clean = "Clean"
     case duplicates = "Duplicates"
     case apps = "Apps"
-    case adBlock = "Ad Blocking"
+    case adBlock = "Ad & Pop-up Blocking"
     case network = "Network"
     case audit = "Security"
 
@@ -119,7 +119,7 @@ private struct Sidebar: View {
             return Text(duplicates.wasted.bytes)
         case .apps where !apps.apps.isEmpty:
             return Text("\(apps.apps.filter { $0.isUnused(days: apps.unusedDays) }.count) unused")
-        case .adBlock where adBlock.blockerEnabled == true || adBlock.hosts.installed:
+        case .adBlock where adBlock.safariBlocking || adBlock.hosts.installed:
             return Text("on").foregroundStyle(Theme.green)
         case .network where network.running:
             return Text("live").foregroundStyle(Theme.green)

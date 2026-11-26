@@ -4,6 +4,14 @@ import Foundation
 /// Apps and tools are invented; addresses are from the documentation ranges (RFC 5737 / RFC 3849).
 @MainActor
 enum Demo {
+    /// Safari's answers and the browsers on a made-up Mac: the content blocker on, the web extension still off.
+    static func fill(adBlock: AdBlockModel) {
+        adBlock.blockerEnabled = true
+        adBlock.webExtensionEnabled = false
+        adBlock.blockedPopups = 37
+        adBlock.browsers = BrowserExtension.knownBrowsers.filter { ["com.google.Chrome", "com.brave.Browser", "org.mozilla.firefox"].contains($0.id) }
+    }
+
     static func fill(junk: JunkModel, duplicates: DuplicatesModel, apps: AppsModel, network: NetworkModel, audit: AuditModel) {
         // Shown in Settings; the argument domain is in-memory only and wins over saved defaults.
         UserDefaults.standard.setVolatileDomain(["awsProfile": "default", "typesafeSSMName": "/bigmac/typesafe-api-key"],

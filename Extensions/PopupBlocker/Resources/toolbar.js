@@ -1,4 +1,4 @@
-// BigMac Pop-up Blocker, the toolbar button's page: the current site, how many pop-ups were
+// BigMac Pop-up and YouTube Blocker, the toolbar button's page: the current site, how many pop-ups were
 // blocked on it in this tab, and the switch that adds it to BigMac's allowed sites. This page
 // belongs to the extension, so a web page can't draw over it or click it. The background script
 // does the work and takes the site from the tab itself.
@@ -13,7 +13,7 @@
 
   function render(state) {
     if (!state) {
-      $("site").textContent = "BigMac Pop-up Blocker";
+      $("site").textContent = "BigMac Pop-up and YouTube Blocker";
       $("count").textContent = "";
       $("row").hidden = true;
       $("note").textContent = "";
@@ -39,12 +39,12 @@
     if (state.allowed && state.via && state.via !== state.site) {
       $("note").textContent = `Allowed through ${state.via}. Turning this off removes ${state.via} from BigMac's allowed sites.`;
     } else {
-      $("note").textContent = "Allowed sites skip all of BigMac's blocking, ads included. You can also manage them in BigMac's Ad Blocking pane.";
+      $("note").textContent = "Allowed sites skip all of BigMac's blocking, ads included. You can also manage them in BigMac, under Ad & Pop-up Blocking.";
     }
     let status = "";
     if (!state.linked) status = "Open BigMac once so this extension can use its settings.";
     else if (!state.allowed && !state.listable) status = "Only sites with a domain name can be allowed, not addresses like this one.";
-    else if (!state.popups) status = "Pop-up blocking is off in BigMac (Ad Blocking, Pop-ups).";
+    else if (!state.popups) status = "Pop-up blocking is off in BigMac (Ad & Pop-up Blocking).";
     $("status").textContent = status;
   }
 

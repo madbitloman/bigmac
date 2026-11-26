@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Ad Blocking: BigMac's Safari content blocker, pop-up blocker and YouTube ad skipper, and the optional system-wide hosts list.
+/// Ad & Pop-up Blocking: one switch and one set of categories for BigMac's blocking in Safari, the allowed sites,
+/// the browsers (Safari's two extensions, and the extension for Chrome and Firefox), and the optional system-wide hosts list.
 struct AdBlockView: View {
     @Environment(AdBlockModel.self) private var model
     @State private var newSite = ""
@@ -8,28 +9,33 @@ struct AdBlockView: View {
     @State private var confirmSystemWide: Bool?
 
     var body: some View {
-        PaneView(title: "Ad Blocking", status: status, busy: model.hostsBusy) {
-            Button { model.openSafariSettings(RuleStore.contentBlockerIdentifier) } label: {
-                ActionLabel("Safari Settings", symbol: "safari")
-            }
-            .buttonStyle(.ghost).disabled(!model.linkedToSafari)
+        PaneView(title: "Ad & Pop-up Blocking", status: status, busy: model.hostsBusy) {
+            Toggle("Blocking", isOn: Binding(get: { model.isEnabled }, set: { model.setEnabled($0) }))
+                .toggleStyle(.switch).labelsHidden().controlSize(.large)
+                .help(model.isEnabled ? "Turn off BigMac's blocking in Safari" : "Turn on BigMac's blocking in Safari")
         } content: {
             CardColumn {
                 if let message = model.message {
                     Callout(symbol: "exclamationmark.triangle", text: message, actionTitle: "Dismiss") { model.message = nil }
                 }
+                if model.showLayoutNotice {
+                    Callout(symbol: "puzzlepiece.extension", text: "BigMac's pop-up blocker and YouTube ad skipper are now one Safari extension, BigMac Pop-up and YouTube Blocker. Check that it's on in Safari's Extensions settings; the separate YouTube Ad Skipper is gone.",
+                            tint: Theme.blue, actionTitle: "OK") { model.dismissLayoutNotice() }
+                }
                 overview
-                safari
                 categories
                 allowed
+                SectionHeader("Browsers")
+                safari
                 BrowserExtensionCard()
+                SectionHeader("Advanced")
                 systemWide
                 credits
             }
         }
         .task { await model.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            // The extensions are switched on in Safari, so re-read their state on coming back.
+            // Extensions are switched on in Safari, and its toolbar page can change the allowed sites, so re-read on coming back.
             Task { await model.refresh() }
         }
         .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirmSystemWide != nil }, set: { if !$0 { confirmSystemWide = nil } })) {
@@ -43,10 +49,10 @@ struct AdBlockView: View {
 
     private var status: String {
         var parts: [String] = []
-        switch model.blockerEnabled {
-        case true?: parts.append("Safari blocking on")
-        case false?: parts.append("Safari blocking off")
-        case nil: break
+        if !model.isEnabled {
+            parts.append("Off")
+        } else if model.linkedToSafari {
+            parts.append(model.safariBlocking ? "On in Safari" : "Not switched on in Safari yet")
         }
         if model.hosts.installed { parts.append("\(model.hosts.entries.formatted()) servers blocked system-wide") }
         return parts.joined(separator: " · ")
@@ -62,64 +68,79 @@ struct AdBlockView: View {
     private var overview: some View {
         Card("Summary") {
             HStack(spacing: 28) {
-                BigStat("Safari", model.blockerEnabled == true ? "On" : "Off", model.blockerEnabled == true ? Theme.green : Theme.tertiary)
-                BigStat("Rules", model.ruleCount.formatted(), Palette.user)
+                BigStat("Safari", safariValue.text, safariValue.color)
+                BigStat("Rules", model.isEnabled ? model.ruleCount.formatted() : "0", Palette.user)
+                BigStat("Pop-ups stopped", model.blockedPopups.formatted(), Theme.text)
                 BigStat("Allowed sites", "\(model.settings.allowedDomains.count)", Theme.text)
-                BigStat("System-wide", model.hosts.installed ? model.hosts.entries.formatted() : "Off",
-                        model.hosts.installed ? Palette.ssd : Theme.tertiary)
                 Spacer(minLength: 0)
             }
-        }
-    }
-
-    private var safari: some View {
-        Card("Safari", symbol: "safari") {
-            CardRows {
-                extensionRow(title: "Ad and tracker blocker",
-                             detail: "\(model.ruleCount.formatted()) rules. Blocks requests and hides ad slots in Safari.",
-                             enabled: model.blockerEnabled, identifier: RuleStore.contentBlockerIdentifier)
-                extensionRow(title: "Pop-up blocker",
-                             detail: popupBlockerDetail,
-                             enabled: model.popupBlockerEnabled, identifier: RuleStore.popupBlockerExtensionIdentifier)
-                extensionRow(title: "YouTube ad skipper",
-                             detail: "Skips video ads on youtube.com. Allow it on youtube.com when Safari asks.",
-                             enabled: model.youTubeEnabled, identifier: RuleStore.youTubeExtensionIdentifier)
-            }
-            if !model.linkedToSafari {
-                Note("Open BigMac.app (not a development build) to use the Safari extensions.")
-            } else if model.blockerEnabled != true || model.youTubeEnabled != true || model.popupBlockerEnabled != true {
-                Note("Safari extensions are switched on in Safari: Settings > Extensions, then tick BigMac's. The pop-up blocker asks to read and change pages on every site: it needs that to see which clicks you made.")
+            if !model.isEnabled {
+                Note("Blocking is off: Safari loads every ad, tracker and pop-up until you switch it back on (top right). Your choices below are kept.")
             }
         }
     }
 
-    private var popupBlockerDetail: String {
-        var text = "Stops tabs, windows and pop-unders a site opens without your click, and invisible full-page links. Optional: allow it on all websites when Safari asks."
-        if model.blockedPopups > 0 { text += " \(model.blockedPopups.formatted()) blocked so far." }
-        return text
-    }
-
-    private func extensionRow(title: String, detail: String, enabled: Bool?, identifier: String) -> some View {
-        SettingRow(title: title, detail: detail) {
-            switch enabled {
-            case true?: Pill(text: "On", tint: Theme.green)
-            case false?: Pill(text: "Off", tint: Theme.tertiary)
-            case nil: EmptyView()
-            }
-            Button(enabled == true ? "Settings…" : "Turn On in Safari…") { model.openSafariSettings(identifier) }
-                .buttonStyle(.ghost).disabled(!model.linkedToSafari)
+    private var safariValue: (text: String, color: Color) {
+        if !model.isEnabled { return ("Off", Theme.tertiary) }
+        switch (model.blockerEnabled, model.webExtensionEnabled) {
+        case (true?, true?): return ("On", Theme.green)
+        case (true?, _), (_, true?): return ("Partly", Theme.orange)
+        default: return ("Off", Theme.tertiary)
         }
     }
 
     private var categories: some View {
-        Card("Block in Safari", symbol: "hand.raised") {
+        Card("What to Block", symbol: "hand.raised") {
             CardRows {
-                ForEach(BlockingCategory.allCases) { category in
-                    SettingRow(title: category.title, detail: category.detail) {
+                ForEach(Self.categoryOrder) { category in
+                    SettingRow(title: category.title, detail: detail(for: category)) {
                         Toggle("", isOn: Binding(get: { model.isOn(category) }, set: { model.set(category, on: $0) }))
                             .toggleStyle(.switch).labelsHidden()
                     }
                 }
+            }
+            .disabled(!model.isEnabled)
+            .opacity(model.isEnabled ? 1 : 0.55)
+            Note("For Safari. The extension for Chrome and Firefox has its own switches under its toolbar button.")
+        }
+    }
+
+    private static let categoryOrder: [BlockingCategory] = [.ads, .trackers, .popups, .strictPopups, .annoyances, .social, .youtube]
+
+    private func detail(for category: BlockingCategory) -> String {
+        if category == .youtube, !model.youTubeSkipperBundled, model.linkedToSafari {
+            return category.detail + ". Not included in this copy of BigMac."
+        }
+        return category.detail
+    }
+
+    private var safari: some View {
+        Card("Safari", symbol: "safari", accessory: {
+            Button { model.openSafariExtensions() } label: { ActionLabel("Open Safari Extensions Settings", symbol: "gearshape") }
+                .buttonStyle(.ghost).disabled(!model.linkedToSafari)
+        }) {
+            CardRows {
+                extensionRow(title: "BigMac Ad Blocker",
+                             detail: "Ads, trackers, pop-up networks and cookie notices. \(model.ruleCount.formatted()) rules. It never sees your pages.",
+                             enabled: model.blockerEnabled)
+                extensionRow(title: "BigMac Pop-up and YouTube Blocker",
+                             detail: "Stops tabs and windows a site opens without your click, and skips YouTube ads. Its toolbar button can always allow pop-ups on a site.",
+                             enabled: model.webExtensionEnabled)
+            }
+            if !model.linkedToSafari {
+                Note("Open BigMac.app (not a development build) to use the Safari extensions.")
+            } else if model.blockerEnabled != true || model.webExtensionEnabled != true {
+                Note("Switch both on in Safari: Settings > Extensions. The pop-up and YouTube blocker asks to read and change pages on every site: it needs that to see which clicks you made. It sends nothing anywhere.")
+            }
+        }
+    }
+
+    private func extensionRow(title: String, detail: String, enabled: Bool?) -> some View {
+        SettingRow(title: title, detail: detail) {
+            switch enabled {
+            case true?: Pill(text: "On", tint: Theme.green)
+            case false?: Pill(text: "Off in Safari", tint: Theme.tertiary)
+            case nil: EmptyView()
             }
         }
     }
@@ -154,7 +175,7 @@ struct AdBlockView: View {
     }
 
     private var systemWide: some View {
-        Card("System-Wide", symbol: "globe") {
+        Card("System-Wide", symbol: "globe", trailing: "Needs your password") {
             CardRows {
                 SettingRow(title: "Block ads in every app", detail: systemWideDetail) {
                     if model.hostsBusy { ProgressView().controlSize(.small) }
@@ -211,6 +232,17 @@ struct SettingRow<Trailing: View>: View {
             Spacer(minLength: 12)
             HStack(spacing: 10) { trailing }
         }
+    }
+}
+
+/// A small heading between groups of cards.
+struct SectionHeader: View {
+    let title: String
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.secondary)
+            .textCase(.uppercase).padding(.top, 10).padding(.leading, 4)
     }
 }
 

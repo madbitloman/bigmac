@@ -1,38 +1,71 @@
 {
   "manifest_version": 3,
-  "name": "BigMac Pop-up Blocker",
+  "name": "BigMac Pop-up and YouTube Blocker",
   "version": "1.0",
-  "description": "Stops sites from opening tabs, windows and pop-unders you did not click for.",
+  "description": "Stops tabs, windows and pop-unders you did not click for, and skips video ads on youtube.com.",
   "icons": {
     "48": "icon-48.png",
     "128": "icon-128.png"
   },
   "action": {
-    "default_title": "BigMac Pop-up Blocker",
+    "default_title": "BigMac Pop-up and YouTube Blocker",
     "default_popup": "toolbar.html",
-    "default_icon": { "48": "icon-48.png", "128": "icon-128.png" }
+    "default_icon": {
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
   },
-  "permissions": ["nativeMessaging", "storage"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "nativeMessaging",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
-    "scripts": ["background.js"],
+    "scripts": [
+      "background.js"
+    ],
     "persistent": false
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["popup-guard.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "popup-guard.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "match_about_blank": true,
       "world": "MAIN"
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["popup-guard-rules.js", "popup-relay.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "popup-guard-rules.js",
+        "popup-relay.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "match_about_blank": true
+    },
+    {
+      "matches": [
+        "*://www.youtube.com/*",
+        "*://m.youtube.com/*",
+        "*://youtube.com/*",
+        "*://music.youtube.com/*"
+      ],
+      "js": [
+        "youtube-loader.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
     }
   ]
 }

@@ -5,7 +5,7 @@
   <key>CFBundleIdentifier</key><string>com.bigmac.app.PopupBlocker</string>
   <key>CFBundleExecutable</key><string>BigMacPopupBlocker</string>
   <key>CFBundleName</key><string>BigMacPopupBlocker</string>
-  <key>CFBundleDisplayName</key><string>BigMac Pop-up Blocker</string>
+  <key>CFBundleDisplayName</key><string>BigMac Pop-up and YouTube Blocker</string>
   <key>CFBundlePackageType</key><string>XPC!</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleShortVersionString</key><string>__VERSION__</string>

@@ -11,6 +11,7 @@ extension BlockingCategory {
         case .annoyances: "Cookie notices and overlays"
         case .social: "Social widgets"
         case .strictPopups: "Strict pop-up blocking"
+        case .youtube: "YouTube ads"
         }
     }
 
@@ -18,16 +19,18 @@ extension BlockingCategory {
         switch self {
         case .ads: "Ad networks and common ad slots (EasyList)"
         case .trackers: "Analytics and cross-site tracking scripts (EasyPrivacy)"
-        case .popups: "Pop-up and pop-under networks, ad overlays, and with the pop-up blocker, tabs a site opens without your click"
+        case .popups: "Pop-up and pop-under networks, ad overlays, and tabs a site opens without your click"
         case .annoyances: "Consent banners, newsletter and survey pop-ups"
         case .social: "Embedded like and share buttons. Can break signing in with a social account."
-        case .strictPopups: "Every new window opened to another site, except common sign-in and payment windows. With the pop-up blocker, also windows a site's own buttons open."
+        case .strictPopups: "Every new window opened to another site, except common sign-in and payment windows. In Safari's pop-up extension, also windows a site's own buttons open."
+        case .youtube: "Skips video ads and hides ad slots on youtube.com"
         }
     }
 }
 
-/// The Ad Blocking pane: Safari content blocker settings (shared with the extension through the app group),
-/// the state of BigMac's three Safari extensions, and the optional system-wide hosts list.
+/// The Ad & Pop-up Blocking pane: one set of settings for Safari (shared with both Safari extensions through
+/// the app group), the state of those two extensions, the Chrome and Firefox extension, and the optional
+/// system-wide hosts list.
 @MainActor @Observable
 final class AdBlockModel {
     private let store: RuleStore
@@ -38,10 +41,13 @@ final class AdBlockModel {
 
     /// nil until Safari has answered (or when it can't, outside the app bundle).
     var blockerEnabled: Bool?
-    var youTubeEnabled: Bool?
-    var popupBlockerEnabled: Bool?
-    /// Pop-ups the Safari pop-up blocker has stopped (it counts them in the app group).
+    var webExtensionEnabled: Bool?
+    /// Pop-ups the Safari web extension has stopped (it counts them in the app group).
     var blockedPopups = 0
+    /// False when BigMac was built without the YouTube ad skipper (it comes with the Chrome and Firefox extension's source).
+    let youTubeSkipperBundled: Bool
+    /// Shown once to someone who used the earlier three-extension layout.
+    var showLayoutNotice = false
 
     var hosts = HostsBlocker.Status()
     /// Fingerprint the hosts block would have with the current allowed sites.
@@ -58,8 +64,12 @@ final class AdBlockModel {
     /// What the last "Show extension in Finder" did.
     var browserExtensionNote: String?
 
-    init() {
-        if let shared = RuleStore.shared {
+    /// `store` is for tests; the app uses the shared app group, or its own defaults in a debug run.
+    init(store injected: RuleStore? = nil, preferences: UserDefaults = .standard) {
+        if let injected {
+            store = injected
+            linkedToSafari = false
+        } else if let shared = RuleStore.shared {
             store = shared
             linkedToSafari = true
         } else {
@@ -68,6 +78,23 @@ final class AdBlockModel {
         }
         settings = store.loadSettings()
         catalog = Self.loadCatalog()
+        youTubeSkipperBundled = Bundle.main.builtInPlugInsURL.map {
+            FileManager.default.fileExists(atPath: $0.appending(path: "BigMacPopupBlocker.appex/Contents/Resources/youtube.js").path)
+        } ?? false
+        self.preferences = preferences
+        // Layout 2: one web extension for pop-ups and YouTube instead of two. Earlier users saved settings already.
+        if preferences.integer(forKey: Self.layoutKey) < 2 {
+            showLayoutNotice = linkedToSafari && store.hasSavedSettings
+            if !showLayoutNotice { preferences.set(2, forKey: Self.layoutKey) }
+        }
+    }
+
+    private let preferences: UserDefaults
+    private static let layoutKey = "adBlockLayout"
+
+    func dismissLayoutNotice() {
+        showLayoutNotice = false
+        preferences.set(2, forKey: Self.layoutKey)
     }
 
     /// The manifest of the lists inside the content blocker, or the checkout's copy in a debug run.
@@ -85,30 +112,50 @@ final class AdBlockModel {
 
     var hostsUpToDate: Bool { hosts.installed && hosts.fingerprint == hostsExpected }
 
+    /// Blocking in Safari: the master switch is on and Safari has the content blocker or the web extension on.
+    var safariBlocking: Bool { settings.enabled && (blockerEnabled == true || webExtensionEnabled == true) }
+
     // MARK: Settings
+
+    var isEnabled: Bool { settings.enabled }
+
+    func setEnabled(_ on: Bool) { update { $0.enabled = on } }
 
     func isOn(_ category: BlockingCategory) -> Bool { settings.enabledCategories.contains(category) }
 
     func set(_ category: BlockingCategory, on: Bool) {
-        if on { settings.enabledCategories.insert(category) } else { settings.enabledCategories.remove(category) }
-        save()
+        update { if on { $0.enabledCategories.insert(category) } else { $0.enabledCategories.remove(category) } }
     }
 
     /// Adds a site to the allowed list; false when the text isn't a usable domain.
     @discardableResult
     func allow(_ text: String) -> Bool {
         guard let domain = DomainNormalizer.normalize(text) else { return false }
-        if !settings.allowedDomains.contains(domain) {
+        update { settings in
+            guard !settings.allowedDomains.contains(domain) else { return }
             settings.allowedDomains.append(domain)
             settings.allowedDomains.sort()
-            save()
         }
         return true
     }
 
     func removeAllowed(_ domain: String) {
-        settings.allowedDomains.removeAll { $0 == domain }
+        update { $0.allowedDomains.removeAll { $0 == domain } }
+    }
+
+    /// Every change starts from what's saved now, not from this pane's copy: the Safari toolbar page changes the
+    /// allowed sites through the app group while BigMac is open, and saving a stale copy would undo that.
+    private func update(_ change: (inout BlockerSettings) -> Void) {
+        var fresh = store.loadSettings()
+        change(&fresh)
+        settings = fresh
         save()
+    }
+
+    /// Picks up changes made elsewhere (the Safari toolbar page) without saving anything.
+    func reloadSettings() {
+        let saved = store.loadSettings()
+        if saved != settings { settings = saved }
     }
 
     private func save() {
@@ -136,10 +183,10 @@ final class AdBlockModel {
     // MARK: State
 
     func refresh() async {
+        reloadSettings()
         if linkedToSafari {
             blockerEnabled = try? await SFContentBlockerManager.stateOfContentBlocker(withIdentifier: RuleStore.contentBlockerIdentifier).isEnabled
-            youTubeEnabled = try? await SFSafariExtensionManager.stateOfSafariExtension(withIdentifier: RuleStore.youTubeExtensionIdentifier).isEnabled
-            popupBlockerEnabled = try? await SFSafariExtensionManager.stateOfSafariExtension(withIdentifier: RuleStore.popupBlockerExtensionIdentifier).isEnabled
+            webExtensionEnabled = try? await SFSafariExtensionManager.stateOfSafariExtension(withIdentifier: RuleStore.webExtensionIdentifier).isEnabled
             blockedPopups = store.blockedPopups
         }
         browsers = BrowserExtension.installedBrowsers()
@@ -156,6 +203,11 @@ final class AdBlockModel {
         hosts = status
         hostsExpected = expected
         hostsAvailable = count
+    }
+
+    /// Safari's Extensions settings, showing BigMac's content blocker (Safari shows the others beside it).
+    func openSafariExtensions() {
+        SFSafariApplication.showPreferencesForExtension(withIdentifier: RuleStore.contentBlockerIdentifier) { _ in }
     }
 
     func openSafariSettings(_ identifier: String) {

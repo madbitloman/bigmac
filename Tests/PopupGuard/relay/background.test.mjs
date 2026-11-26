@@ -1,4 +1,4 @@
-// Tests the pop-up blocker's background script (Extensions/PopupBlocker/Resources/background.js)
+// Tests the Safari web extension's background script (pop-ups and YouTube) (Extensions/PopupBlocker/Resources/background.js)
 // in Node with stand-ins for Safari's extension APIs and the native handler. No browser, no network.
 //   node Tests/PopupGuard/relay/background.test.mjs
 import { readFileSync } from "node:fs";
@@ -10,12 +10,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, "../../../Extensions/PopupBlocker/Resources/background.js"), "utf8");
 const EXT = "safari-web-extension://abc/";
 
-function load({ allowed = [], tabs = {} } = {}) {
+function load({ allowed = [], tabs = {}, youtube = true } = {}) {
   const native = [];
+  const injected = [];
   const tabMessages = [];
   const reloads = [];
   let listener = null;
-  const store = { popups: true, strict: false, allowed: [...allowed], linked: true };
+  const store = { popups: true, strict: false, youtube, allowed: [...allowed], linked: true };
   const browser = {
     runtime: {
       id: "bigmac",
@@ -35,13 +36,17 @@ function load({ allowed = [], tabs = {} } = {}) {
       reload: async (id) => { reloads.push(id); },
       onRemoved: { addListener() {} },
     },
+    scripting: {
+      insertCSS: async ({ target, files }) => { injected.push({ ...target, files }); },
+      executeScript: async ({ target, files }) => { injected.push({ ...target, files }); },
+    },
   };
   vm.runInNewContext(source, { browser, URL, Date, Promise, console });
   const send = (message, sender) => new Promise((resolve) => {
     const async = listener(message, sender, resolve);
     if (!async) resolve(undefined);
   });
-  return { send, native, tabMessages, reloads, store };
+  return { send, native, tabMessages, reloads, store, injected };
 }
 
 const toolbar = { id: "bigmac", url: EXT + "toolbar.html" };
@@ -119,6 +124,22 @@ await test("blocked pop-ups are counted per tab and start again on another site"
   expect(toasts.length === 4 && toasts.every((t) => !("site" in t.message)), "the notice message should carry no site");
   const s = await bg.send({ type: "toolbar-state", tabId: 7 }, toolbar);
   expect(s.blocked === 0, `count for a.example after the tab moved on: ${s.blocked}`);
+});
+
+await test("the YouTube skipper goes into the asking frame only when its switch is on and the site isn't allowed", async () => {
+  const on = load();
+  const answer = await on.send({ type: "youtube-config" }, { ...contentScript("https://www.youtube.com/watch?v=x", 7), frameId: 3 });
+  const files = on.injected.flatMap((i) => i.files).sort();
+  expect(answer?.enabled === true && files.join() === "youtube.css,youtube.js" && on.injected.every((i) => i.tabId === 7 && i.frameIds.join() === "3"),
+    `answer ${JSON.stringify(answer)}, injected ${JSON.stringify(on.injected)}`);
+  const off = load({ youtube: false });
+  const offAnswer = await off.send({ type: "youtube-config" }, contentScript("https://www.youtube.com/"));
+  expect(offAnswer?.enabled === false && off.injected.length === 0, `switch off: ${JSON.stringify(off.injected)}`);
+  const allowed = load({ allowed: ["youtube.com"] });
+  await allowed.send({ type: "youtube-config" }, contentScript("https://www.youtube.com/"));
+  expect(allowed.injected.length === 0, "injected on an allowed site");
+  const toolbarAsks = load();
+  expect((await toolbarAsks.send({ type: "youtube-config" }, toolbar)) === undefined && toolbarAsks.injected.length === 0, "answered a sender without a tab");
 });
 
 console.log("Background (Node)");

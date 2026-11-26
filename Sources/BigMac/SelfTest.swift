@@ -7,6 +7,20 @@ import WebKit
 /// Headless checks: `BigMac --selftest <fixture-dir> [--jev] [--bedrock]`.
 /// Only writes inside the fixture dir; scans of the real home folder are read-only.
 enum SelfTest {
+    /// Where scripts/bundle-browser-extension.sh copies the browser extension from (same rules), if it's there.
+    static func blockerExtensionSource(checkout: URL) -> URL? {
+        var source: URL
+        if let dir = ProcessInfo.processInfo.environment["BLOCKER_EXTENSION_DIR"], !dir.isEmpty {
+            source = URL(filePath: dir)
+        } else {
+            let common = Shell.run("/usr/bin/git", ["-C", checkout.path, "rev-parse", "--path-format=absolute", "--git-common-dir"])?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? checkout.appending(path: ".git").path
+            source = URL(filePath: common).deletingLastPathComponent().deletingLastPathComponent().appending(path: "adblocker/WebExtension")
+        }
+        source = source.standardizedFileURL
+        return FileManager.default.fileExists(atPath: source.appending(path: "manifest.json").path) ? source : nil
+    }
+
     static func run(arguments: [String]) async -> Never {
         var failures = 0
         func check(_ ok: Bool, _ label: String) {
@@ -56,6 +70,7 @@ enum SelfTest {
         let emptyRules = (try? JSONSerialization.jsonObject(with: Data(contentsOf: rulesFile))) as? [Any]
         check(emptyCount == 0 && emptyRules?.count == 1, "everything off still gives Safari a valid one-rule list")
 
+        let checkoutURL = URL(filePath: FileManager.default.currentDirectoryPath)
         print("Pop-up blocking")
         let popupRules = (assembled ?? []).filter {
             (($0["trigger"] as? [String: Any])?["resource-type"] as? [String])?.contains("popup") == true
@@ -97,6 +112,87 @@ enum SelfTest {
                                     " example.com", "127.0.0.1", "localhost", "", String(repeating: "a.", count: 127) + "com", 42, nil]
         check(refusedSites.allSatisfy { DomainNormalizer.siteName(from: $0) == nil },
               "a URL, path, user, port, address, oversize name or non-string never becomes an allowed site")
+
+        print("One switch, one Safari web extension")
+        let webExtension = popupManifest ?? [:]
+        let youtubeScript = scripts.first { ($0["js"] as? [String]) == ["youtube-loader.js"] }
+        check((webExtension["permissions"] as? [String]).map { Set($0).isSuperset(of: ["nativeMessaging", "scripting"]) } == true
+              && (youtubeScript?["matches"] as? [String])?.contains("*://www.youtube.com/*") == true
+              && !scripts.contains { ($0["js"] as? [String])?.contains("youtube.js") == true },
+              "the web extension carries pop-ups and YouTube; the skipper is injected only when its switch is on")
+        check(!FileManager.default.fileExists(atPath: checkoutURL.appending(path: "Extensions/YouTube").path),
+              "the separate YouTube extension is gone from the source")
+        let builtPlugIns = checkoutURL.appending(path: "build/BigMac.app/Contents/PlugIns")
+        if let appexes = try? FileManager.default.contentsOfDirectory(atPath: builtPlugIns.path) {
+            check(appexes.sorted() == ["BigMacContentBlocker.appex", "BigMacPopupBlocker.appex"],
+                  "the built app has two Safari extensions: \(appexes.sorted())")
+            let builtResources = builtPlugIns.appending(path: "BigMacPopupBlocker.appex/Contents/Resources")
+            let builtManifest = (try? JSONSerialization.jsonObject(with: Data(contentsOf: builtResources.appending(path: "manifest.json")))) as? [String: Any] ?? [:]
+            let named = BrowserExtension.referencedFiles(manifest: builtManifest)
+            let absent = named.filter { !FileManager.default.fileExists(atPath: builtResources.appending(path: $0).path) }
+            check(builtManifest["name"] as? String == "BigMac Pop-up and YouTube Blocker" && named.count >= 7 && absent.isEmpty,
+                  "the built web extension's manifest parses and every file it names is there (\(named.count) files\(absent.isEmpty ? "" : ", missing \(absent)"))")
+            let builtGuard = (try? Data(contentsOf: builtResources.appending(path: "popup-guard.js"))) ?? Data()
+            let builtRules = (try? Data(contentsOf: builtResources.appending(path: "popup-guard-rules.js"))) ?? Data()
+            check(builtGuard == guardSource && builtRules == guardSource, "the built extension's guard and its relay's copy are the recorded guard")
+            let skipper = ["youtube.js", "youtube.css"].map { FileManager.default.fileExists(atPath: builtResources.appending(path: $0).path) }
+            let skipperOK = skipper.allSatisfy { $0 } || BrowserExtension.bundled(resources: checkoutURL.appending(path: "build/BigMac.app/Contents/Resources")) == nil
+            check(skipperOK, "the YouTube skipper is in the built web extension whenever the browser extension is (\(skipper))")
+        } else {
+            print("  - skipped the built-app checks: no build/BigMac.app (run make-app.sh)")
+        }
+        var off = BlockerSettings(enabledCategories: Set(BlockingCategory.allCases), allowedDomains: ["example.com"])
+        off.enabled = false
+        let offCount = (try? RuleAssembler.write(settings: off, catalog: catalog, fragmentsDirectory: filters, to: rulesFile)) ?? -1
+        check(offCount == 0 && off.activeCategories.isEmpty && off.enabledCategories.count == BlockingCategory.allCases.count,
+              "the master switch off gives Safari the match-nothing list and keeps the category choices")
+        let legacy = try? JSONDecoder().decode(BlockerSettings.self, from: Data(#"{"enabledCategories":["ads","popups"],"allowedDomains":["a.example"]}"#.utf8))
+        check(legacy?.enabled == true && legacy?.enabledCategories == [.ads, .popups, .youtube] && legacy?.allowedDomains == ["a.example"],
+              "settings saved by the earlier layout load with blocking on and YouTube on")
+        let roundTrip = try? JSONDecoder().decode(BlockerSettings.self, from: JSONEncoder().encode(off))
+        check(roundTrip == off, "the master switch and categories survive a save and load")
+        let suite = "bigmac-selftest-\(UUID().uuidString.prefix(8))"
+        do {
+            let (allowedAfter, paneAfter) = await MainActor.run {
+                let shared = UserDefaults(suiteName: suite)!, prefs = UserDefaults(suiteName: suite + "-prefs")!
+                let appStore = RuleStore(defaults: shared)
+                try? appStore.save(BlockerSettings())
+                let pane = AdBlockModel(store: appStore, preferences: prefs)
+                // The Safari toolbar page allows a site through the app group while the pane is open...
+                var fromToolbar = RuleStore(defaults: shared).loadSettings()
+                fromToolbar.allowedDomains.append("toolbar.example")
+                try? RuleStore(defaults: shared).save(fromToolbar)
+                // ...then the pane changes something else.
+                pane.allow("app.example")
+                pane.set(.social, on: true)
+                return (appStore.loadSettings().allowedDomains, pane.settings.allowedDomains)
+            }
+            check(allowedAfter == ["app.example", "toolbar.example"] && paneAfter == allowedAfter,
+                  "a site the toolbar page allowed while BigMac was open survives BigMac's next save (\(allowedAfter))")
+            UserDefaults.standard.removePersistentDomain(forName: suite)
+            UserDefaults.standard.removePersistentDomain(forName: suite + "-prefs")
+        }
+
+        print("the blocking engine's source stays out of this repository")
+        let tracked = (Shell.run("/usr/bin/git", ["-C", checkoutURL.path, "ls-files"]) ?? "").split(separator: "\n").map(String.init)
+        check(!tracked.isEmpty && !tracked.contains { $0.hasPrefix("build/") || $0.hasPrefix(".build/") },
+              "git tracks \(tracked.count) files, none from the build folders")
+        if let source = Self.blockerExtensionSource(checkout: checkoutURL) {
+            let sourceFiles = (FileManager.default.enumerator(at: source, includingPropertiesForKeys: [.isRegularFileKey])?.allObjects as? [URL] ?? [])
+                .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+            func sha(_ url: URL) -> String? {
+                (try? Data(contentsOf: url)).map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
+            }
+            let privateHashes = Set(sourceFiles.compactMap(sha))
+            let copies = tracked.filter { path in
+                path != "Extensions/PopupBlocker/Resources/popup-guard.js"
+                    && sha(checkoutURL.appending(path: path)).map(privateHashes.contains) == true
+            }
+            check(sourceFiles.count > 10 && copies.isEmpty,
+                  "no tracked file is a copy of the extension's \(sourceFiles.count) source files, except the recorded guard\(copies.isEmpty ? "" : ": \(copies)")")
+        } else {
+            print("  - skipped the copy check: the extension's source isn't on this Mac (BLOCKER_EXTENSION_DIR)")
+        }
 
         print("Chrome and Firefox extension")
         let checkout = URL(filePath: FileManager.default.currentDirectoryPath)

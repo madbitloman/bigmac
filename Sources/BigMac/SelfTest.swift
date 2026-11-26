@@ -98,6 +98,32 @@ enum SelfTest {
         check(refusedSites.allSatisfy { DomainNormalizer.siteName(from: $0) == nil },
               "a URL, path, user, port, address, oversize name or non-string never becomes an allowed site")
 
+        print("Chrome and Firefox extension")
+        let checkout = URL(filePath: FileManager.default.currentDirectoryPath)
+        if let bundled = BrowserExtension.bundled(resources: checkout.appending(path: "build/BigMac.app/Contents/Resources")) {
+            let problems = BrowserExtension.verify(folder: bundled.folder, sums: bundled.sums)
+            let listed = BrowserExtension.parseSums((try? String(contentsOf: bundled.sums, encoding: .utf8)) ?? "")
+            check(problems.isEmpty && listed.count > 10,
+                  "the bundled copy (\(bundled.folder.path.replacingOccurrences(of: checkout.path + "/", with: ""))) matches its SHA-256 list, \(listed.count) files\(problems.isEmpty ? "" : ": \(problems.prefix(3))")")
+            let manifest = (try? JSONSerialization.jsonObject(with: Data(contentsOf: bundled.folder.appending(path: "manifest.json")))) as? [String: Any] ?? [:]
+            let referenced = BrowserExtension.referencedFiles(manifest: manifest)
+            let missing = referenced.filter { !FileManager.default.fileExists(atPath: bundled.folder.appending(path: $0).path) }
+            check(manifest["manifest_version"] as? Int == 3 && referenced.count > 5 && missing.isEmpty,
+                  "its manifest parses and every file it names is there (\(referenced.count) files\(missing.isEmpty ? "" : ", missing \(missing)"))")
+            // Outside the fixture folder: the duplicate scans below would find the copy's files.
+            let support = dir.deletingLastPathComponent().appending(path: "bigmac-support-\(UUID().uuidString.prefix(8))")
+            defer { try? FileManager.default.removeItem(at: support) }
+            let stable = support.appending(path: "BigMac/BrowserExtension")
+            let first = (try? BrowserExtension.install(bundled, to: stable)) == true
+            let again = (try? BrowserExtension.install(bundled, to: stable)) == false
+            try? "tampered".write(to: stable.appending(path: "manifest.json"), atomically: true, encoding: .utf8)
+            let repaired = (try? BrowserExtension.install(bundled, to: stable)) == true
+                && BrowserExtension.verify(folder: stable, sums: stable.deletingLastPathComponent().appending(path: "BrowserExtension.sha256")).isEmpty
+            check(first && again && repaired, "Show in Finder copies it once, skips an identical copy, and replaces a changed one")
+        } else {
+            print("  - skipped: no bundled copy (build with make-app.sh and the extension's source)")
+        }
+
         let names = HostsBlocker.names(allowed: ["doubleclick.net"])
         check(names.count > 70_000, "system-wide list has \(names.count) servers")
         check(!names.contains("doubleclick.net") && !names.contains { $0.hasSuffix(".doubleclick.net") }, "allowed site and its subdomains left out")

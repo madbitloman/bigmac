@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SafariServices
 
@@ -49,6 +50,13 @@ final class AdBlockModel {
     var hostsAvailable = 0
     var hostsBusy = false
     var message: String?
+
+    /// The Chrome and Firefox extension inside the app; nil when BigMac was built without it.
+    let browserExtension = BrowserExtension.bundled()
+    /// Browsers on this Mac that can take it, by bundle identifier.
+    var browsers: [BrowserExtension.Browser] = []
+    /// What the last "Show extension in Finder" did.
+    var browserExtensionNote: String?
 
     init() {
         if let shared = RuleStore.shared {
@@ -134,6 +142,7 @@ final class AdBlockModel {
             popupBlockerEnabled = try? await SFSafariExtensionManager.stateOfSafariExtension(withIdentifier: RuleStore.popupBlockerExtensionIdentifier).isEnabled
             blockedPopups = store.blockedPopups
         }
+        browsers = BrowserExtension.installedBrowsers()
         await refreshHosts()
     }
 
@@ -151,6 +160,26 @@ final class AdBlockModel {
 
     func openSafariSettings(_ identifier: String) {
         SFSafariApplication.showPreferencesForExtension(withIdentifier: identifier) { _ in }
+    }
+
+    // MARK: Chrome and Firefox
+
+    /// Copies the extension to its folder in Application Support (only when it changed) and selects it in Finder.
+    func showBrowserExtension() {
+        guard let bundled = browserExtension else { return }
+        do {
+            let copied = try BrowserExtension.install(bundled)
+            browserExtensionNote = copied
+                ? "Copied version \(bundled.version). If a browser already has it, click Reload on its extensions page."
+                : "Version \(bundled.version) is up to date in this folder."
+            NSWorkspace.shared.activateFileViewerSelecting([BrowserExtension.stableFolder])
+        } catch {
+            message = "Couldn't copy the browser extension: \(error.localizedDescription)"
+        }
+    }
+
+    func openExtensionsPage(of browser: BrowserExtension.Browser) {
+        BrowserExtension.openExtensionsPage(of: browser)
     }
 
     // MARK: System-wide

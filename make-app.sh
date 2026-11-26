@@ -28,6 +28,19 @@ cp .build/release/BigMac "$APP/Contents/MacOS/BigMac"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/hosts-blocklist.txt "$APP/Contents/Resources/"
 
+# The Chrome and Firefox extension isn't in this repository:
+# scripts/bundle-browser-extension.sh copies it at build time and lists its files' SHA-256 beside it.
+# Without its source the app is built without it and the Ad Blocking pane says so.
+BROWSER_EXT=0
+if scripts/bundle-browser-extension.sh build/BrowserExtension; then
+  ditto --norsrc --noextattr build/BrowserExtension "$APP/Contents/Resources/BrowserExtension"
+  cp build/BrowserExtension.sha256 "$APP/Contents/Resources/BrowserExtension.sha256"
+  (cd "$APP/Contents/Resources/BrowserExtension" && shasum -a 256 -c --quiet ../BrowserExtension.sha256)
+  BROWSER_EXT=1
+else
+  [[ $? -eq 3 ]] || exit 1
+fi
+
 # Safari extensions (Extensions/): each is a sandboxed .appex in Contents/PlugIns, built straight with swiftc
 # because SwiftPM can't produce app extensions. The content blocker shares Sources/BigMac/AdBlock/Shared with the app.
 appex() { # name dir sources...
@@ -102,4 +115,5 @@ if [[ ${#NOTARY_AUTH[@]} -gt 0 && "$SIGN_IDENTITY" != "-" ]]; then
   xcrun stapler validate "$APP"
   rm -f "$ZIP"
 fi
+(( BROWSER_EXT )) || print -u2 "warning: built WITHOUT the Chrome and Firefox extension (see above)"
 echo "Built $APP — run: open $APP"

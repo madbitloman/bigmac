@@ -22,6 +22,7 @@ struct AdBlockView: View {
                 safari
                 categories
                 allowed
+                BrowserExtensionCard()
                 systemWide
                 credits
             }

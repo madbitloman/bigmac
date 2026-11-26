@@ -3,11 +3,15 @@
 # They are not part of this repository: they're copied at build time from
 #   ${BLOCKER_SOURCE_DIR:-<this checkout's sibling folder>/adblocker}
 # into gitignored folders, with a SHA-256 list of every copy (build/blocker.sha256) checked against the source:
+#   Sources/BigMac/AdBlock/Engine/        the blocking engine's Swift files, unchanged, and a link to
+#                                         Support/BlockerEngine/Included.swift, BigMac's side of it
 #   build/blocker/Filters/                EasyList and EasyPrivacy in Safari's rule format (the content blocker's lists)
 #   build/blocker/popup-guard.js          the pop-up guard of the Safari web extension
 #   build/blocker/popup-guard-fixtures/   test pages for the guard (see Tests/PopupGuard/README.md)
 # build/blocker.from lists where each copy came from, for the self-test.
-# Without the source, BigMac is built without ad blocking and the Ad & Pop-up Blocking pane says so.
+# Without the source, Sources/BigMac/AdBlock/Engine gets only a link to Support/BlockerEngine/NotIncluded.swift:
+# BigMac is built without ad blocking and the Ad & Pop-up Blocking pane says so.
+# Run it again after switching between the two (swift build and make-app.sh then use what it set up).
 #
 #   scripts/fetch-blocker-sources.sh             # before swift build (make-app.sh runs it first)
 #   scripts/fetch-blocker-sources.sh --require   # fails when the source is missing
@@ -25,12 +29,28 @@ if [[ -z "${BLOCKER_SOURCE_DIR:-}" ]]; then
   BLOCKER_SOURCE_DIR="$(dirname "$(dirname "$COMMON")")/adblocker"
 fi
 
+ENGINE=Sources/BigMac/AdBlock/Engine
 OUT=build/blocker
 SUMS=build/blocker.sha256
 FROM=build/blocker.from
 rm -rf "$OUT" "$SUMS" "$FROM"
+mkdir -p "$ENGINE"
+
+# The engine's files, unchanged. BigMac's own changes live in its own files (Sources/BigMac/AdBlock/Shared).
+ENGINE_FILES=(BlockerSettings ContentRule DomainNormalizer FilterCatalog FilterLists RuleAssembler RuleCompiler)
+
+# Leaves only the named files in the engine folder, plus BlockerEngine.swift linked to Support/BlockerEngine/$1.
+engine_folder() { # Included|NotIncluded keep...
+  local glue=$1; shift
+  local keep=(BlockerEngine.swift "$@")
+  for f in "$ENGINE"/*(DN); do
+    (( ${keep[(Ie)${f:t}]} )) || rm -rf "$f"
+  done
+  ln -sfh "../../../../Support/BlockerEngine/$glue.swift" "$ENGINE/BlockerEngine.swift"
+}
 
 if [[ ! -f "$BLOCKER_SOURCE_DIR/WebExtension/popup-guard.js" ]]; then
+  engine_folder NotIncluded
   print -u2 ""
   print -u2 "warning: the blocking engine was not found at $BLOCKER_SOURCE_DIR"
   print -u2 "warning: BigMac will be built WITHOUT ad blocking (the Ad & Pop-up Blocking pane says so). Set BLOCKER_SOURCE_DIR to its folder."
@@ -42,6 +62,9 @@ SRC=$(cd "$BLOCKER_SOURCE_DIR" && pwd -P)
 
 # What is copied: "source path in the engine repository" -> "destination in this checkout".
 typeset -a PAIRS
+for f in $ENGINE_FILES; do
+  PAIRS+=("Shared/$f.swift" "$ENGINE/$f.swift")
+done
 for f in easylist.block.json easylist.allow.json easyprivacy.block.json easyprivacy.allow.json manifest.json; do
   PAIRS+=("Filters/Generated/$f" "$OUT/Filters/$f")
 done
@@ -58,12 +81,18 @@ for f in ${FIXTURES:#}; do
 done
 
 mkdir -p build "$OUT"; : > "$SUMS.tmp"; : > "$FROM.tmp"
+engine_folder Included ${^ENGINE_FILES}.swift
 for src dest in "${PAIRS[@]}"; do
   [[ -f "$SRC/$src" ]] || { print -u2 "error: $SRC/$src is missing"; exit 1; }
   mkdir -p "${dest:h}"
-  cp -X "$SRC/$src" "$dest"   # -X: no extended attributes, so code signing sees plain files
+  if [[ "$dest" == "$ENGINE"/* ]]; then
+    # Swift files are replaced only when they changed, so an unchanged engine isn't compiled again.
+    cmp -s "$SRC/$src" "$dest" || cp -X "$SRC/$src" "$dest"
+  else
+    cp -X "$SRC/$src" "$dest"   # -X: no extended attributes, so code signing sees plain files
+    touch -h -t 200001010000 "$dest"   # same bytes and dates on every build
+  fi
   chmod 644 "$dest"
-  touch -h -t 200001010000 "$dest"   # same bytes and dates on every build
   theirs=$(shasum -a 256 "$SRC/$src" | cut -d' ' -f1)
   ours=$(shasum -a 256 "$dest" | cut -d' ' -f1)
   [[ "$theirs" == "$ours" ]] || { print -u2 "error: the copy $dest doesn't match $SRC/$src"; exit 1; }

@@ -11,6 +11,25 @@ struct AdBlockView: View {
     var scrollTo: String?
 
     var body: some View {
+        if model.included { pane } else { notIncluded }
+    }
+
+    /// A build without the blocking engine (a copy of the repository on its own; see README, Building).
+    private var notIncluded: some View {
+        PaneView(title: "Ad & Pop-up Blocking", status: "Not included in this build") {
+            EmptyView()
+        } content: {
+            CardColumn {
+                Card("Ad blocking isn't included in this build", symbol: "hand.raised") {
+                    Text("This copy of BigMac was built without its ad and pop-up blocker, so it adds nothing to Safari or to other browsers, and it leaves /etc/hosts alone. Everything else in BigMac works as usual.")
+                        .font(Theme.body).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                    Note("BigMac's released app includes it.")
+                }
+            }
+        }
+    }
+
+    private var pane: some View {
         PaneView(title: "Ad & Pop-up Blocking", status: status, busy: model.hostsBusy) {
             Text(model.isEnabled ? "Blocking on" : "Blocking off").font(Theme.body).foregroundStyle(Theme.secondary)
             Toggle("Blocking", isOn: Binding(get: { model.isEnabled }, set: { model.setEnabled($0) }))
@@ -115,9 +134,9 @@ struct AdBlockView: View {
         }
     }
 
-    private static let categoryOrder: [BlockingCategory] = [.ads, .trackers, .popups, .strictPopups, .annoyances, .social, .youtube]
+    private static let categoryOrder: [AdBlockCategory] = [.ads, .trackers, .popups, .strictPopups, .annoyances, .social, .youtube]
 
-    private func detail(for category: BlockingCategory) -> String {
+    private func detail(for category: AdBlockCategory) -> String {
         if category == .youtube, !model.youTubeSkipperBundled, model.linkedToSafari {
             return category.detail + ". Not included in this copy of BigMac."
         }
@@ -214,7 +233,7 @@ struct AdBlockView: View {
     private var credits: some View {
         Card("Block Lists", symbol: "list.bullet.rectangle") {
             CardRows {
-                ForEach(model.catalog.lists) { list in
+                ForEach(model.filterLists) { list in
                     SettingRow(title: list.title, detail: "\(list.ruleCount.formatted()) rules, version \(list.version)") {
                         Link(list.license, destination: URL(string: list.homepage) ?? URL(string: "https://easylist.to")!)
                     }

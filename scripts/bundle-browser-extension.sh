@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Copies the Chrome and Firefox extension into a build folder.
 # Its source is not part of this repository: it is copied at build time from
-#   ${BLOCKER_EXTENSION_DIR:-<this checkout's sibling folder>/adblocker/WebExtension}
+#   ${BLOCKER_EXTENSION_DIR:-${BLOCKER_SOURCE_DIR:-<this checkout's sibling folder>/adblocker}/WebExtension}
 # into build/BrowserExtension (gitignored), with a SHA-256 list of every copied file beside it
 # (build/BrowserExtension.sha256), checked against the source after the copy.
 #
@@ -18,10 +18,14 @@ DEST="${1:-build/BrowserExtension}"
 DEST="${DEST%/}"
 SUMS="$DEST.sha256"
 
-# Default source: the folder next to this repository's main checkout (worktrees live elsewhere).
+# Default source: the engine repository's checkout as scripts/fetch-blocker-sources.sh finds it ($BLOCKER_SOURCE_DIR, or the
+# folder next to this repository's main checkout; worktrees live elsewhere).
 if [[ -z "${BLOCKER_EXTENSION_DIR:-}" ]]; then
-  COMMON=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "$PWD/.git")
-  BLOCKER_EXTENSION_DIR="$(dirname "$(dirname "$COMMON")")/adblocker/WebExtension"
+  if [[ -z "${BLOCKER_SOURCE_DIR:-}" ]]; then
+    COMMON=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "$PWD/.git")
+    BLOCKER_SOURCE_DIR="$(dirname "$(dirname "$COMMON")")/adblocker"
+  fi
+  BLOCKER_EXTENSION_DIR="$BLOCKER_SOURCE_DIR/WebExtension"
 fi
 SRC="$BLOCKER_EXTENSION_DIR"
 

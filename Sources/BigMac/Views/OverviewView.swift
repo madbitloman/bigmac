@@ -111,14 +111,19 @@ struct OverviewView: View {
                         action: "Snapshot", busy: network.busy) { Task { await network.refresh() } }
     }
 
-    private var adBlockCard: some View {
+    @ViewBuilder private var adBlockCard: some View {
         let on = adBlock.safariBlocking
-        return ToolCard(pane: .adBlock, open: open,
-                        value: on ? "On in Safari" : "Off in Safari",
-                        color: on ? Theme.green : Theme.tertiary,
-                        detail: adBlock.hosts.installed ? "\(adBlock.hosts.entries.formatted()) servers blocked system-wide"
-                                                        : "\(adBlock.ruleCount.formatted()) rules ready",
-                        action: nil, busy: false) {}
+        if !adBlock.included {
+            ToolCard(pane: .adBlock, open: open, value: "Not included", color: Theme.tertiary,
+                     detail: "Not part of this build", action: nil, busy: false) {}
+        } else {
+            ToolCard(pane: .adBlock, open: open,
+                     value: on ? "On in Safari" : "Off in Safari",
+                     color: on ? Theme.green : Theme.tertiary,
+                     detail: adBlock.hosts.installed ? "\(adBlock.hosts.entries.formatted()) servers blocked system-wide"
+                                                     : "\(adBlock.ruleCount.formatted()) rules ready",
+                     action: nil, busy: false) {}
+        }
     }
 }
 

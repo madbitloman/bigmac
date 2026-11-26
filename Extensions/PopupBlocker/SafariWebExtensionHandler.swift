@@ -10,7 +10,7 @@ import SafariServices
 ///   "allow", "site"       adds the site to the allowed list (the content blocker reloads too), then as "settings"
 ///   "disallow", "site"    removes that entry from the allowed list (the content blocker reloads too), then as "settings"
 /// Only the toolbar button's page asks for "allow" and "disallow" (background.js checks the sender).
-/// "site" must be a bare domain (DomainNormalizer.siteName); anything else changes nothing.
+/// "site" must be a bare domain (BlockerEngine.siteName); anything else changes nothing.
 ///   "blocked"             counts one blocked pop-up for BigMac's Ad & Pop-up Blocking pane, then as "settings"
 @objc(SafariWebExtensionHandler)
 final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
@@ -26,18 +26,18 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 enum PopupBlockerSettings {
     static func handle(_ message: [String: Any]) -> [String: Any] {
         // Without the app group (an unsigned build), the defaults apply: pop-ups blocked, nothing allowed.
-        let store = RuleStore.shared
-        var settings = store?.loadSettings() ?? BlockerSettings()
+        let store = SettingsStore.shared
+        var settings = store?.loadSettings() ?? SafariSettings()
         switch message["type"] as? String {
         case "allow":
-            if let store, let domain = DomainNormalizer.siteName(from: message["site"]),
+            if let store, let domain = BlockerEngine.siteName(from: message["site"]),
                !settings.allowedDomains.contains(domain) {
                 settings.allowedDomains.append(domain)
                 settings.allowedDomains.sort()
                 save(settings, in: store)
             }
         case "disallow":
-            if let store, let domain = DomainNormalizer.siteName(from: message["site"]),
+            if let store, let domain = BlockerEngine.siteName(from: message["site"]),
                settings.allowedDomains.contains(domain) {
                 settings.allowedDomains.removeAll { $0 == domain }
                 save(settings, in: store)
@@ -56,8 +56,8 @@ enum PopupBlockerSettings {
         ]
     }
 
-    private static func save(_ settings: BlockerSettings, in store: RuleStore) {
+    private static func save(_ settings: SafariSettings, in store: SettingsStore) {
         try? store.save(settings)
-        SFContentBlockerManager.reloadContentBlocker(withIdentifier: RuleStore.contentBlockerIdentifier) { _ in }
+        SFContentBlockerManager.reloadContentBlocker(withIdentifier: SettingsStore.contentBlockerIdentifier) { _ in }
     }
 }

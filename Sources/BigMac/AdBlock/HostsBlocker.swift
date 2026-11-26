@@ -5,7 +5,7 @@ import Foundation
 /// for ad and tracker hosts. It blocks whole servers only; page elements are the Safari blocker's job.
 ///
 /// BigMac only ever touches its own block between the BEGIN and END markers, and only writes `0.0.0.0 <name>`
-/// lines for names that pass `DomainNormalizer.isValidHost`, so nothing it installs can redirect a name elsewhere.
+/// lines for names that pass `isServerName`, so nothing it installs can redirect a name elsewhere.
 enum HostsBlocker {
     static let hostsPath = "/private/etc/hosts"
     static let beginPrefix = "# BEGIN BigMac ad blocking"
@@ -37,13 +37,29 @@ enum HostsBlocker {
                 names.insert(String(line).trimmingCharacters(in: .whitespaces).lowercased())
             }
         }
-        for name in FilterLists.adDomains + FilterLists.trackerDomains + FilterLists.popupDomains + FilterLists.annoyanceDomains {
+        for name in BlockerEngine.hostsDomains {
             names.insert(name.lowercased())
         }
-        let allowed = allowed.compactMap(DomainNormalizer.normalize)
+        let allowed = allowed.compactMap(BlockerEngine.normalize)
         return names.filter { name in
-            DomainNormalizer.isValidHost(name) && !allowed.contains { name == $0 || name.hasSuffix("." + $0) }
+            isServerName(name) && !allowed.contains { name == $0 || name.hasSuffix("." + $0) }
         }.sorted()
+    }
+
+    /// A name that may go after `0.0.0.0` in /etc/hosts: at most 253 characters, two or more labels separated by
+    /// dots, each 1 to 63 of a-z, 0-9 and hyphens (never first or last), and a letter in the last label, so it's
+    /// never an address. Anything else (spaces, newlines, upper case, a trailing dot) is refused.
+    static func isServerName(_ name: String) -> Bool {
+        let bytes = Array(name.utf8)
+        guard bytes.count <= 253 else { return false }
+        let labels = bytes.split(separator: UInt8(ascii: "."), omittingEmptySubsequences: false)
+        guard labels.count >= 2, let last = labels.last, last.contains(where: { (UInt8(ascii: "a")...UInt8(ascii: "z")).contains($0) })
+        else { return false }
+        return labels.allSatisfy { label in
+            (1...63).contains(label.count)
+                && label.first != UInt8(ascii: "-") && label.last != UInt8(ascii: "-")
+                && label.allSatisfy { (UInt8(ascii: "a")...UInt8(ascii: "z")).contains($0) || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0) || $0 == UInt8(ascii: "-") }
+        }
     }
 
     /// Resources/hosts-blocklist.txt in the app bundle, or in the checkout for unbundled debug runs.
@@ -60,7 +76,7 @@ enum HostsBlocker {
     /// The block BigMac appends, markers included; empty for no names.
     static func block(for names: [String]) -> String {
         guard !names.isEmpty else { return "" }
-        let safe = names.filter(DomainNormalizer.isValidHost)
+        let safe = names.filter(isServerName)
         return "\(beginPrefix) (\(fingerprint(safe))): managed by BigMac, turn it off in BigMac > Ad Blocking\n"
             + safe.map { "0.0.0.0 \($0)\n" }.joined() + endLine + "\n"
     }
@@ -102,7 +118,7 @@ enum HostsBlocker {
         for line in hosts.split(separator: "\n") {
             if line.hasPrefix(beginPrefix) { inside = true; continue }
             if line == endLine { inside = false; continue }
-            if inside, line.hasPrefix("0.0.0.0 "), DomainNormalizer.isValidHost(String(line.dropFirst(8))) {
+            if inside, line.hasPrefix("0.0.0.0 "), isServerName(String(line.dropFirst(8))) {
                 out.insert(String(line))
             }
         }

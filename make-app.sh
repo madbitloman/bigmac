@@ -30,7 +30,7 @@ BLOCKER=0
 swift build -c release
 APP=build/BigMac.app
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/PlugIns"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/BigMac "$APP/Contents/MacOS/BigMac"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/hosts-blocklist.txt "$APP/Contents/Resources/"
@@ -49,7 +49,9 @@ else
 fi
 
 # Safari extensions (Extensions/): each is a sandboxed .appex in Contents/PlugIns, built straight with swiftc
-# because SwiftPM can't produce app extensions. The content blocker shares Sources/BigMac/AdBlock/Shared with the app.
+# because SwiftPM can't produce app extensions. Both share Sources/BigMac/AdBlock/Shared (BigMac's settings) and
+# Sources/BigMac/AdBlock/Engine (the blocking engine) with the app. A build without the engine has neither.
+ADBLOCK_SOURCES=(Sources/BigMac/AdBlock/Shared/*.swift Sources/BigMac/AdBlock/Engine/*.swift)
 appex() { # name dir sources...
   local name=$1 dir=$2; shift 2
   local out="$APP/Contents/PlugIns/$name.appex/Contents"
@@ -58,25 +60,28 @@ appex() { # name dir sources...
     -Xlinker -e -Xlinker _NSExtensionMain "$@" -o "$out/MacOS/$name"
   sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" "$dir/Info.plist" > "$out/Info.plist"
 }
-appex BigMacContentBlocker Extensions/ContentBlocker Extensions/ContentBlocker/*.swift Sources/BigMac/AdBlock/Shared/*.swift
-cp build/blocker/Filters/*.json "$APP/Contents/PlugIns/BigMacContentBlocker.appex/Contents/Resources/"
-# BigMac's one Safari web extension: the pop-up blocker and the YouTube ad skipper. It reads BigMac's settings
-# through the app group, so it shares the AdBlock code too. (Bundle id com.bigmac.app.PopupBlocker, kept from when
-# it was the pop-up blocker alone, so Safari keeps it switched on; see docs/safari-blocker-design.md.)
-appex BigMacPopupBlocker Extensions/PopupBlocker Extensions/PopupBlocker/*.swift Sources/BigMac/AdBlock/Shared/*.swift -framework SafariServices
-POPUPS="$APP/Contents/PlugIns/BigMacPopupBlocker.appex/Contents/Resources"
-cp Extensions/PopupBlocker/Resources/* "$POPUPS/"
-# The guard (from the build-time copy) runs in the page's world, and its relay needs the same rules in the isolated
-# world; browsers inject a file only once per frame, so the relay's copy goes in under a second name.
-cp build/blocker/popup-guard.js "$POPUPS/popup-guard.js"
-cp build/blocker/popup-guard.js "$POPUPS/popup-guard-rules.js"
-# Its icons are BigMac's own.
-for s in 48 128; do sips -z $s $s Resources/AppIcon.png --out "$POPUPS/icon-$s.png" >/dev/null; done
-# The YouTube ad skipper comes from the same build-time copy as the Chrome and Firefox extension.
-if (( BROWSER_EXT )) && [[ -f build/BrowserExtension/youtube.js && -f build/BrowserExtension/youtube.css ]]; then
-  cp build/BrowserExtension/youtube.js build/BrowserExtension/youtube.css "$POPUPS/"
-else
-  print -u2 "warning: built WITHOUT the YouTube ad skipper (it comes with the Chrome and Firefox extension's source)"
+if (( BLOCKER )); then
+  mkdir -p "$APP/Contents/PlugIns"
+  appex BigMacContentBlocker Extensions/ContentBlocker Extensions/ContentBlocker/*.swift $ADBLOCK_SOURCES
+  cp build/blocker/Filters/*.json "$APP/Contents/PlugIns/BigMacContentBlocker.appex/Contents/Resources/"
+  # BigMac's one Safari web extension: the pop-up blocker and the YouTube ad skipper. It reads BigMac's settings
+  # through the app group, so it shares the AdBlock code too. (Bundle id com.bigmac.app.PopupBlocker, kept from when
+  # it was the pop-up blocker alone, so Safari keeps it switched on; see docs/safari-blocker-design.md.)
+  appex BigMacPopupBlocker Extensions/PopupBlocker Extensions/PopupBlocker/*.swift $ADBLOCK_SOURCES -framework SafariServices
+  POPUPS="$APP/Contents/PlugIns/BigMacPopupBlocker.appex/Contents/Resources"
+  cp Extensions/PopupBlocker/Resources/* "$POPUPS/"
+  # The guard (from the build-time copy) runs in the page's world, and its relay needs the same rules in the isolated
+  # world; browsers inject a file only once per frame, so the relay's copy goes in under a second name.
+  cp build/blocker/popup-guard.js "$POPUPS/popup-guard.js"
+  cp build/blocker/popup-guard.js "$POPUPS/popup-guard-rules.js"
+  # Its icons are BigMac's own.
+  for s in 48 128; do sips -z $s $s Resources/AppIcon.png --out "$POPUPS/icon-$s.png" >/dev/null; done
+  # The YouTube ad skipper comes from the same build-time copy as the Chrome and Firefox extension.
+  if (( BROWSER_EXT )) && [[ -f build/BrowserExtension/youtube.js && -f build/BrowserExtension/youtube.css ]]; then
+    cp build/BrowserExtension/youtube.js build/BrowserExtension/youtube.css "$POPUPS/"
+  else
+    print -u2 "warning: built WITHOUT the YouTube ad skipper (it comes with the Chrome and Firefox extension's source)"
+  fi
 fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -108,8 +113,10 @@ sign() { # path entitlements
     codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" --entitlements "$2" "$1"
   fi
 }
-sign "$APP/Contents/PlugIns/BigMacContentBlocker.appex" Extensions/ContentBlocker/Extension.entitlements
-sign "$APP/Contents/PlugIns/BigMacPopupBlocker.appex" Extensions/PopupBlocker/Extension.entitlements
+if (( BLOCKER )); then
+  sign "$APP/Contents/PlugIns/BigMacContentBlocker.appex" Extensions/ContentBlocker/Extension.entitlements
+  sign "$APP/Contents/PlugIns/BigMacPopupBlocker.appex" Extensions/PopupBlocker/Extension.entitlements
+fi
 sign "$APP" Resources/BigMac.entitlements
 codesign --verify --strict --deep --verbose=2 "$APP"
 
@@ -130,5 +137,6 @@ if [[ ${#NOTARY_AUTH[@]} -gt 0 && "$SIGN_IDENTITY" != "-" ]]; then
   xcrun stapler validate "$APP"
   rm -f "$ZIP"
 fi
+(( BLOCKER )) || print -u2 "warning: built WITHOUT ad blocking: no Safari extensions (see above)"
 (( BROWSER_EXT )) || print -u2 "warning: built WITHOUT the Chrome and Firefox extension (see above)"
 echo "Built $APP — run: open $APP"

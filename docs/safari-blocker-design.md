@@ -31,15 +31,13 @@ WebKit's source (WebKit/WebKit `main`, November 2026) answers most of it:
 
 | | Rules |
 |---|---|
-| the blocking engine's DNR rulesets (the Chrome and Firefox extension) | 13,530 rules (6 regex) |
-| The same rules after Safari's per-domain expansion (counted from the files) | about 107,000 content rules |
 | BigMac's content blocker lists (`Extensions/Filters`, all categories) | 115,521 rules, compiled by WebKit in the self-test |
 | of which element hiding (`css-display-none`) | 5,705 |
 | of which pop-up windows (`resource-type: popup`) | 2,956 |
 | of which limited to or excluding sites (`if-domain` / `unless-domain`) | 6,513 |
 
-Both land on the same engine at about the same size. Moving to DNR would not make Safari faster; it would lose the
-2,956 pop-up rules (DNR can't express "a new window to this address") and move 5,705 hiding rules out of the engine
+A DNR list grouped by domain expands back to roughly this size in Safari, on the same engine. Moving to DNR would
+not make Safari faster; it would lose the 2,956 pop-up rules (DNR can't express "a new window to this address") and move 5,705 hiding rules out of the engine
 into scripts.
 
 ## Other differences that matter for BigMac

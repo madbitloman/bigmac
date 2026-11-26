@@ -17,7 +17,7 @@ if [[ -z "${BLOCKER_SOURCE_DIR:-}" ]]; then
   BLOCKER_SOURCE_DIR="$(dirname "$(dirname "$COMMON")")/adblocker"
 fi
 if ! git -C "$BLOCKER_SOURCE_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-  print -u2 "the engine repository's git checkout wasn't found at $BLOCKER_SOURCE_DIR (set BLOCKER_SOURCE_DIR); nothing was checked."
+  print -u2 "The engine repository's git checkout wasn't found at $BLOCKER_SOURCE_DIR (set BLOCKER_SOURCE_DIR); nothing was checked."
   exit 2
 fi
 
